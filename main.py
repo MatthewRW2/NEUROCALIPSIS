@@ -13,7 +13,9 @@
 ║   K o Click Izq → Pistola (apunta al cursor)            ║
 ║   L             → Descarga Neural (ralentiza enemigos)   ║
 ║   R             → Recargar munición                      ║
-║   ESC           → Salir                                  ║
+║   ESC           → Pausa   Q (en pausa) = Salir            ║
+║   TAB           → Menú habilidades   F1 = Debug          ║
+║   SHIFT         → Dash (si desbloqueado)                  ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
@@ -26,6 +28,9 @@ import os
 
 import effects
 from particles import ParticleSystem
+import abilities as ab
+import minimap as mm
+from data.load_stats import get_enemy_stats
 
 pygame.init()
 
@@ -234,6 +239,13 @@ class Player:
         self.slash_effects = []
         self.walk_t  = 0
         self.walk_fr = 0
+        self.abilities = dict(ab.DEFAULT_ABILITIES)
+        self.jumps_left = 1
+        self.dash_timer = 0
+        self.dash_cooldown = 0
+        self.on_wall = False
+        self.wall_side = 0
+        self.show_ability_menu = False
 
     @property
     def rect(self): return pygame.Rect(int(self.x), int(self.y), self.PW, self.PH)
@@ -261,6 +273,7 @@ class Player:
             spawn(self.cx, self.cy, GOLD, 22, 5, 55, 7)
             self.levelup_t = 130
             leveled = True
+        ab.check_unlocks(self.level, self.abilities)
         return leveled
 
     def do_slash(self):
@@ -288,25 +301,63 @@ class Player:
 
     def update(self, keys, tiles):
         for attr in ("slash_cd","shoot_cd","neural_cd","hurt_t","inv_t",
-                     "neural_t","combo_t","levelup_t"):
-            setattr(self, attr, max(0, getattr(self, attr) - 1))
+                     "neural_t","combo_t","levelup_t","dash_timer","dash_cooldown"):
+            setattr(self, attr, max(0, getattr(self, attr, 0) - 1))
+
+        if self.on_ground:
+            self.jumps_left = 2 if ab.has_ability(self.abilities, ab.ABILITY_DOUBLE_JUMP) else 1
+
+        self.on_wall = False
+        self.wall_side = 0
+        r = self.rect
+        for t in tiles:
+            if r.colliderect(t): continue
+            if self.vy != 0 or not self.on_ground:
+                if self.x + self.PW <= t.left and t.left - (self.x + self.PW) < 8 and t.top < self.y + self.PH and t.bottom > self.y:
+                    self.on_wall = True
+                    self.wall_side = -1
+                if self.x >= t.right and self.x - t.right < 8 and t.top < self.y + self.PH and t.bottom > self.y:
+                    self.on_wall = True
+                    self.wall_side = 1
 
         mv = 0
         if keys[pygame.K_a] or keys[pygame.K_LEFT]:  mv = -1
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]: mv =  1
         if mv:
             self.facing = mv
-            self.vx = lerp(self.vx, mv * 5.6, 0.22)
+            if self.dash_timer <= 0:
+                self.vx = lerp(self.vx, mv * 5.6, 0.22)
             self.walk_t += 1
             if self.walk_t % 7 == 0:
                 self.walk_fr = (self.walk_fr + 1) % 4
         else:
-            self.vx = lerp(self.vx, 0, 0.18)
+            if self.dash_timer <= 0:
+                self.vx = lerp(self.vx, 0, 0.18)
 
-        if (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]) and self.on_ground:
-            self.vy = -14.2
-            self.on_ground = False
-            spawn(self.cx, self.y + self.PH, CYAN, 6, 2, 14, 3)
+        if self.dash_timer > 0:
+            self.vx = self.facing * 14
+            self.vy *= 0.5
+        elif ab.has_ability(self.abilities, ab.ABILITY_DASH) and self.dash_cooldown <= 0 and (keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]):
+            self.dash_timer = 12
+            self.dash_cooldown = 45
+            spawn(self.cx, self.cy, PURPLE, 8, 4, 18, 3)
+
+        if (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]):
+            if self.on_ground:
+                self.vy = -14.2
+                self.on_ground = False
+                self.jumps_left -= 1
+                spawn(self.cx, self.y + self.PH, CYAN, 6, 2, 14, 3)
+            elif ab.has_ability(self.abilities, ab.ABILITY_DOUBLE_JUMP) and self.jumps_left > 0 and self.dash_timer <= 0:
+                self.vy = -14.2
+                self.jumps_left -= 1
+                spawn(self.cx, self.cy, GOLD, 10, 3, 20, 4)
+            elif ab.has_ability(self.abilities, ab.ABILITY_WALL_JUMP) and self.on_wall and self.dash_timer <= 0:
+                self.vy = -13
+                self.vx = -self.wall_side * 10
+                self.facing = -self.wall_side
+                self.on_wall = False
+                spawn(self.cx, self.cy, CYAN, 8, 3, 16, 3)
 
         self.vy = min(self.vy + GRAV, 18)
 
@@ -409,9 +460,24 @@ class Enemy:
         self.patrol_t    = 0
         self.aggro_r     = 380
         self.phase       = 1
+        self.attack_windup = 0
         sc = lv - 1
+        stats = get_enemy_stats()
+        st = stats.get(etype)
 
-        if etype == "infectado":
+        if st:
+            self.w = st.get("w", 30)
+            self.h = st.get("h", 40)
+            self.hp = self.max_hp = st.get("base_hp", 50) + sc * st.get("hp_per_level", 15)
+            self.speed = st.get("speed_base", 2) + sc * st.get("speed_per_level", 0.2)
+            self.xp_val = st.get("xp_base", 20) + sc * st.get("xp_per_level", 5)
+            self.col = tuple(st.get("color", [100, 100, 100]))
+            self.at_r = st.get("at_r", 40)
+            self.dmg = st.get("dmg_base", 10) + sc * st.get("dmg_per_level", 2)
+            self.at_cd = st.get("at_cd", 60)
+            if etype == "drone":
+                self.bob = random.uniform(0, math.tau)
+        elif etype == "infectado":
             self.w, self.h = 26, 42
             self.hp = self.max_hp = 65  + sc*22
             self.speed  = 2.3 + sc*0.3
@@ -440,6 +506,15 @@ class Enemy:
             self.xp_val = 350
             self.col    = (60, 0, 130)
             self.at_r   = 78; self.dmg = 38+sc*6; self.at_cd = 68
+        else:
+            self.w, self.h = 26, 42
+            self.hp = self.max_hp = 50 + sc*15
+            self.speed = 2.0 + sc*0.2
+            self.xp_val = 20 + sc*5
+            self.col = (100, 100, 100)
+            self.at_r = 40
+            self.dmg = 10 + sc*2
+            self.at_cd = 60
 
     @property
     def cx(self): return self.x + self.w / 2
@@ -466,6 +541,7 @@ class Enemy:
         dx   = player.cx - self.cx
         dy   = player.cy - self.cy
         dist = math.hypot(dx, dy)
+        self.slowed = player.neural_t > 0 and dist < self.aggro_r
         slow = 0.35 if player.neural_t > 0 else 1.0
 
         # ── DRONE (flotante) ──────────────────────────────
@@ -492,12 +568,21 @@ class Enemy:
             self.facing = 1 if dx >= 0 else -1
             if abs(dx) > self.at_r:
                 self.vx = self.facing * self.speed * slow
+                self.attack_windup = 0
             else:
                 self.vx *= 0.7
-                if self.attack_t <= 0:
-                    player.take_damage(self.dmg)
+                if self.attack_t <= 0 and self.attack_windup <= 0:
                     self.attack_t = self.at_cd
+                    self.attack_windup = 22
+                if self.attack_windup > 0:
+                    self.attack_windup -= 1
+                elif self.attack_windup == 0:
+                    player.take_damage(self.dmg)
+                    effects.trigger_shake(is_melee_hit=True)
                     spawn(player.cx, player.cy, RED, 7, 4, 20)
+                    self.attack_windup = -1
+                if self.attack_windup == -1 and self.attack_t <= 0:
+                    self.attack_windup = 0
             # jefe fase 2: dispara
             if self.etype == "jefe" and self.phase >= 2 and self.shoot_t <= 0:
                 bullets_list.append(
@@ -534,6 +619,11 @@ class Enemy:
         rx, ry = int(self.x - ox), int(self.y - oy)
         if rx < -120 or rx > W + 120: return
         col = RED if self.hurt_t > 0 else self.col
+        if getattr(self, "slowed", False):
+            r, g, b = col
+            col = (min(255, r + 80), min(255, g + 20), min(255, b + 120))
+            pulse = 0.7 + 0.3 * math.sin(pygame.time.get_ticks() * 0.01)
+            col = (int(col[0] * pulse), int(col[1] * pulse), min(255, int(col[2] * 1.2)))
 
         if self.etype == "infectado":
             pygame.draw.rect(surf, col, (rx, ry+14, self.w, self.h-14), border_radius=4)
@@ -865,6 +955,23 @@ def draw_pause_menu(surf):
     txt(surf, "F1 = Debug", FNT_XS, DKGREY, W//2 - 35, H//2 + 60)
 
 
+def draw_ability_menu(surf, abilities_dict):
+    """Menú de desbloqueos (TAB)."""
+    bx, by = W//2 - 180, H//2 - 160
+    panel = pygame.Surface((360, 320), pygame.SRCALPHA)
+    panel.fill((10, 20, 40, 230))
+    surf.blit(panel, (bx, by))
+    pygame.draw.rect(surf, CYAN, (bx, by, 360, 320), 2, border_radius=10)
+    txt(surf, "HABILIDADES", FNT_MED, CYAN, bx + 90, by + 12)
+    txt(surf, "TAB = Cerrar", FNT_XS, GREY, bx + 120, by + 48)
+    y = by + 75
+    for aid, name in ab.ABILITY_NAMES.items():
+        unlocked = abilities_dict.get(aid, False)
+        col = GREEN if unlocked else DKGREY
+        txt(surf, ("[OK] " if unlocked else "[--] ") + name, FNT_SM, col, bx + 24, y)
+        y += 32
+
+
 # ─────────────────────────────────────────────────────────
 # DEBUG (F1): FPS, hitboxes
 # ─────────────────────────────────────────────────────────
@@ -907,9 +1014,11 @@ def run():
     tiles, plat_objs, enemies, items, world_w, bg_col, zone_name, checkpoints = build_level(level_n)
     tile_grid = build_tile_grid(tiles)
     player  = Player(80, 530)
+    ab.check_unlocks(player.level, player.abilities)
     bullets = []
     boss    = next((e for e in enemies if e.etype == "jefe"), None)
     last_checkpoint_idx = 0
+    minimap_discovered = set()
 
     cam_x, cam_y = 0.0, 0.0
     zone_msg_t   = 220
@@ -917,7 +1026,7 @@ def run():
 
     def reset_level(n, p, at_checkpoint_idx=None):
         nonlocal tiles, plat_objs, enemies, items, world_w, bg_col
-        nonlocal zone_name, bullets, boss, zone_msg_t, fade_in, tile_grid, checkpoints, last_checkpoint_idx
+        nonlocal zone_name, bullets, boss, zone_msg_t, fade_in, tile_grid, checkpoints, last_checkpoint_idx, minimap_discovered
         tiles, plat_objs, enemies, items, world_w, bg_col, zone_name, checkpoints = build_level(n)
         tile_grid = build_tile_grid(tiles)
         bullets.clear()
@@ -926,6 +1035,7 @@ def run():
             last_checkpoint_idx = at_checkpoint_idx
         else:
             last_checkpoint_idx = 0
+            minimap_discovered.clear()
         cx, cy = checkpoints[last_checkpoint_idx]
         p.x, p.y = float(cx), float(cy)
         p.vx = p.vy = 0
@@ -935,11 +1045,13 @@ def run():
         boss = next((e for e in enemies if e.etype == "jefe"), None)
         zone_msg_t = 220
         fade_in = 255
+        minimap_discovered.clear()
+        mm.update_discovered(minimap_discovered, player.x, player.y)
 
     while True:
         dt   = clock.tick(FPS)
         tick += 1
-        effects.update()
+        effects.update_effects()
         keys = pygame.key.get_pressed()
         mx, my    = pygame.mouse.get_pos()
         world_mx  = mx + int(cam_x)
@@ -989,6 +1101,7 @@ def run():
                 if state == "playing":
                     if event.key == pygame.K_j: player.do_slash()
                     if event.key == pygame.K_l: player.do_neural()
+                    if event.key == pygame.K_TAB: player.show_ability_menu = not player.show_ability_menu
 
             if state == "playing" and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 b = player.do_shoot(world_mx, world_my)
@@ -1055,6 +1168,8 @@ def run():
 
             update_particles()
 
+            mm.update_discovered(minimap_discovered, player.x, player.y)
+
             # checkpoints: activar si el jugador pasa por uno
             for i, (cx, cy) in enumerate(checkpoints):
                 if abs(player.cx - cx) < 100 and abs(player.cy - cy) < 80:
@@ -1112,6 +1227,10 @@ def run():
 
             draw_hud(screen, player, zone_name, score,
                      boss if boss and boss.alive else None)
+            mm.draw_minimap(screen, minimap_discovered, player.x, player.y, world_w, 800, W - 200, H - 118)
+
+            if player.show_ability_menu:
+                draw_ability_menu(screen, player.abilities)
 
             if state == "dead":
                 draw_overlay(screen, "GAME OVER",
