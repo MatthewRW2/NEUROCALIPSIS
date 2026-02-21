@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "infectado": {
+    "w": 26, "h": 42,
+    "base_hp": 65, "hp_per_level": 22,
+    "speed_base": 2.3, "speed_per_level": 0.3,
+    "xp_base": 20, "xp_per_level": 6,
+    "at_r": 34, "dmg_base": 12, "dmg_per_level": 3, "at_cd": 62,
+    "color": [175, 75, 75]
+  },
+  "drone": {
+    "w": 30, "h": 22,
+    "base_hp": 48, "hp_per_level": 16,
+    "speed_base": 2.8, "speed_per_level": 0.4,
+    "xp_base": 32, "xp_per_level": 8,
+    "at_r": 350, "dmg_base": 14, "dmg_per_level": 3, "at_cd": 88,
+    "color": [90, 90, 245]
+  },
+  "mutante": {
+    "w": 44, "h": 64,
+    "base_hp": 185, "hp_per_level": 55,
+    "speed_base": 1.05, "speed_per_level": 0.15,
+    "xp_base": 62, "xp_per_level": 16,
+    "at_r": 54, "dmg_base": 28, "dmg_per_level": 6, "at_cd": 82,
+    "color": [120, 60, 28]
+  },
+  "jefe": {
+    "w": 78, "h": 96,
+    "base_hp": 650, "hp_per_level": 120,
+    "speed_base": 1.6, "speed_per_level": 0,
+    "xp_base": 350, "xp_per_level": 0,
+    "at_r": 78, "dmg_base": 38, "dmg_per_level": 6, "at_cd": 68,
+    "color": [60, 0, 130]
+  },
+  "dasher": {
+    "w": 28, "h": 40,
+    "base_hp": 55, "hp_per_level": 18,
+    "speed_base": 2.0, "speed_per_level": 0.25,
+    "xp_base": 28, "xp_per_level": 7,
+    "at_r": 80, "dmg_base": 22, "dmg_per_level": 4, "at_cd": 90,
+    "dash_speed": 12, "dash_duration": 12, "dash_cd": 100,
+    "color": [200, 80, 80]
+  },
+  "sniper": {
+    "w": 24, "h": 48,
+    "base_hp": 40, "hp_per_level": 12,
+    "speed_base": 1.2, "speed_per_level": 0.1,
+    "xp_base": 35, "xp_per_level": 9,
+    "at_r": 400, "dmg_base": 25, "dmg_per_level": 5, "at_cd": 120,
+    "cover_chance": 0.6, "cover_duration": 45,
+    "color": [80, 180, 100]
+  },
+  "invocador": {
+    "w": 36, "h": 52,
+    "base_hp": 70, "hp_per_level": 20,
+    "speed_base": 1.0, "speed_per_level": 0.1,
+    "xp_base": 45, "xp_per_level": 12,
+    "at_r": 200, "summon_interval": 180, "summon_type": "infectado",
+    "color": [150, 50, 200]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "volume_master": 0.8,
+  "volume_sfx": 1.0,
+  "volume_music": 0.7,
+  "fullscreen": false,
+  "show_damage_numbers": true,
+  "keys": {
+    "left": "a",
+    "right": "d",
+    "jump": "space",
+    "slash": "j",
+    "shoot": "k",
+    "neural": "l",
+    "reload": "r",
+    "dash": "left shift",
+    "ability_menu": "tab"
+  }
+}
