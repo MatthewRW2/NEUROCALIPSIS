@@ -41,7 +41,6 @@ pygame.display.set_caption("NEUROCALIPSIS: El Último Fragmento")
 # ─────────────────────────────────────────────────────────
 # CONSTANTES GLOBALES
 # ─────────────────────────────────────────────────────────
-W, H = 1280, 720
 FPS  = 60
 GRAV = 0.58
 
@@ -59,7 +58,9 @@ DARKBLUE = (10,  20,  40)
 GREY     = (80,  90, 110)
 DKGREY   = (20,  25,  35)
 
-screen = pygame.display.set_mode((W, H))
+# Pantalla completa (resolución nativa del monitor)
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+W, H = screen.get_size()
 clock  = pygame.time.Clock()
 
 try:
@@ -246,6 +247,9 @@ class Player:
         self.on_wall = False
         self.wall_side = 0
         self.show_ability_menu = False
+        self.land_t = 0
+        self.anim_t = 0
+        self.was_on_ground = True
 
     @property
     def rect(self): return pygame.Rect(int(self.x), int(self.y), self.PW, self.PH)
@@ -387,6 +391,15 @@ class Player:
 
         self.x = max(0.0, self.x)
 
+        if self.on_ground:
+            if not self.was_on_ground and self.vy >= 0:
+                self.land_t = 14
+            self.land_t = max(0, self.land_t - 1)
+        else:
+            self.land_t = 0
+        self.was_on_ground = self.on_ground
+        self.anim_t += 1
+
         for se in self.slash_effects[:]:
             se.update()
             if not se.alive: self.slash_effects.remove(se)
@@ -398,47 +411,70 @@ class Player:
         armor_col = (75, 85, 115) if not blink else RED
         suit_col  = (28, 36, 55)
 
-        # piernas
-        lsp = int(math.sin(self.walk_fr * math.pi / 2) * 5) if abs(self.vx) > 0.5 else 0
-        pygame.draw.rect(surf, suit_col,   (rx+4,     ry+34, 10, 18), border_radius=3)
-        pygame.draw.rect(surf, suit_col,   (rx+16,    ry+34, 10, 18), border_radius=3)
+        # Animación: squash al aterrizar, inclinación al correr, estiramiento en salto
+        t = self.anim_t * 0.12
+        land_squash = 0
+        if self.land_t > 0:
+            land_squash = (self.land_t / 14.0) * 0.25
+        run_tilt = 0
+        if abs(self.vx) > 0.5 and self.on_ground and self.dash_timer <= 0:
+            run_tilt = self.facing * min(0.15, abs(self.vx) / 40.0)
+        jump_stretch = 0
+        if not self.on_ground and self.dash_timer <= 0:
+            jump_stretch = -0.03 * max(-1, min(1, self.vy / 8.0))
+        idle_breath = 0.02 * math.sin(t) if abs(self.vx) < 0.3 and self.on_ground else 0
+
+        # Piernas animadas (ciclo de carrera más fluido)
+        leg_phase = (self.anim_t * 0.35) % (2 * math.pi)
+        lsp = int(math.sin(leg_phase) * 6) if abs(self.vx) > 0.5 else int(math.sin(t) * 2)
+        lsp2 = int(math.sin(leg_phase + math.pi) * 6) if abs(self.vx) > 0.5 else int(math.sin(t + 1) * 2)
+        leg_y_off = int(land_squash * 4)
+        pygame.draw.rect(surf, suit_col,   (rx+4,     ry+34+leg_y_off, 10, 18-leg_y_off), border_radius=3)
+        pygame.draw.rect(surf, suit_col,   (rx+16,    ry+34+leg_y_off, 10, 18-leg_y_off), border_radius=3)
         pygame.draw.rect(surf, (18,18,28), (rx+2+lsp, ry+49, 13,  5))
-        pygame.draw.rect(surf, (18,18,28), (rx+15-lsp,ry+49, 13,  5))
+        pygame.draw.rect(surf, (18,18,28), (rx+15+lsp2, ry+49, 13,  5))
 
-        # cuerpo + armadura
-        pygame.draw.rect(surf, body_col,  (rx+2, ry+20, 26, 16), border_radius=4)
-        pygame.draw.rect(surf, armor_col, (rx+2, ry+18, 26,  8), border_radius=3)
+        # Cuerpo con squash/tilt/breath
+        body_w = int(26 + land_squash * 8 - abs(jump_stretch) * 10)
+        body_h = int(16 - land_squash * 4 + jump_stretch * 20)
+        body_x = rx + 2 + int(idle_breath * 3)
+        body_y = ry + 20 + int(land_squash * 2)
+        pygame.draw.rect(surf, body_col,  (body_x, body_y, body_w, body_h), border_radius=4)
+        pygame.draw.rect(surf, armor_col, (body_x, body_y-2, body_w, 8), border_radius=3)
 
-        # brazo con implante cibernético
+        # Brazo con implante
         imp_x = rx + self.PW + 2 if self.facing > 0 else rx - 10
-        pygame.draw.rect(surf, suit_col, (imp_x, ry+22, 8, 12), border_radius=3)
+        imp_y = ry + 22 + int(run_tilt * 6)
+        pygame.draw.rect(surf, suit_col, (imp_x, imp_y, 8, 12), border_radius=3)
         ic = PURPLE if self.neural_t > 0 else CYAN
-        glow_circle(surf, ic, imp_x + 4, ry + 28, 9, 80)
+        glow_circle(surf, ic, imp_x + 4, imp_y + 6, 9, 80)
 
-        # cabeza
-        pygame.draw.circle(surf, body_col, (rx + 15, ry + 13), 13)
+        # Cabeza con ligero movimiento
+        head_x = rx + 15 + int(run_tilt * 8) + int(idle_breath * 2)
+        head_y = ry + 13 + int(land_squash * 2)
+        pygame.draw.circle(surf, body_col, (head_x, head_y), 13)
         pygame.draw.arc(surf, suit_col,
-                        pygame.Rect(rx+1, ry+1, 28, 20),
+                        pygame.Rect(head_x-14, head_y-12, 28, 20),
                         math.radians(10), math.radians(170), 5)
-        ex = rx + (19 if self.facing > 0 else 9)
-        pygame.draw.circle(surf, RED, (ex, ry + 13), 4)
-        glow_circle(surf, RED, ex, ry + 13, 8, 110)
+        ex = head_x + (4 if self.facing > 0 else -4)
+        pygame.draw.circle(surf, RED, (ex, head_y), 4)
+        glow_circle(surf, RED, ex, head_y, 8, 110)
 
-        # katana
+        # Katana (ángulo según ataque o dash)
         kx  = rx + (self.PW + 4 if self.facing > 0 else -16)
-        ky  = ry + 20
+        ky  = ry + 20 + int(run_tilt * 4)
         bk  = CYAN if self.slash_cd > 14 else (140, 200, 255)
-        ex2 = kx + self.facing * 20
-        ey2 = ky + 17
+        slash_ang = 0.4 if self.slash_cd > 10 else 0.6
+        ex2 = kx + self.facing * int(20 * math.cos(slash_ang))
+        ey2 = ky + int(17 * math.sin(slash_ang))
         pygame.draw.line(surf, (70, 70, 85), (kx, ky), (ex2, ey2), 4)
         pygame.draw.line(surf, bk,           (kx, ky), (ex2, ey2), 2)
         glow_circle(surf, bk, ex2, ey2, 7, 80)
 
-        # aura neural
+        # Aura neural
         if self.neural_t > 0:
             glow_circle(surf, PURPLE, rx + 15, ry + 25, 52, 55)
 
-        # slash effects
         for se in self.slash_effects:
             se.draw(surf, ox, oy)
 
@@ -461,6 +497,7 @@ class Enemy:
         self.aggro_r     = 380
         self.phase       = 1
         self.attack_windup = 0
+        self.anim_t      = 0
         sc = lv - 1
         stats = get_enemy_stats()
         st = stats.get(etype)
@@ -537,6 +574,7 @@ class Enemy:
         self.hurt_t   = max(0, self.hurt_t   - 1)
         self.attack_t = max(0, self.attack_t  - 1)
         self.shoot_t  = max(0, self.shoot_t   - 1)
+        self.anim_t   += 1
 
         dx   = player.cx - self.cx
         dy   = player.cy - self.cy
@@ -625,27 +663,41 @@ class Enemy:
             pulse = 0.7 + 0.3 * math.sin(pygame.time.get_ticks() * 0.01)
             col = (int(col[0] * pulse), int(col[1] * pulse), min(255, int(col[2] * 1.2)))
 
+        t = self.anim_t * 0.08
+        atk_raise = 0
+        if getattr(self, "attack_windup", 0) > 0:
+            atk_raise = (1 - self.attack_windup / 22.0) * 12
+
         if self.etype == "infectado":
-            pygame.draw.rect(surf, col, (rx, ry+14, self.w, self.h-14), border_radius=4)
-            pygame.draw.circle(surf, col, (rx+self.w//2, ry+12), 13)
-            ex = rx + (10 if self.facing > 0 else 5)
-            pygame.draw.circle(surf, RED, (ex,   ry+11), 3)
-            pygame.draw.circle(surf, RED, (ex+7, ry+11), 3)
-            pygame.draw.line(surf, PINK, (rx, ry+20), (rx+self.w, ry+20), 1)
-            pygame.draw.line(surf, PINK, (rx, ry+28), (rx+self.w, ry+28), 1)
+            sway = int(math.sin(t) * 3)
+            body_y = ry + 14
+            pygame.draw.rect(surf, col, (rx + sway, body_y, self.w, self.h-14), border_radius=4)
+            head_y = ry + 12 - atk_raise
+            pygame.draw.circle(surf, col, (rx+self.w//2 + sway, head_y), 13)
+            ex = rx + (10 if self.facing > 0 else 5) + sway
+            pygame.draw.circle(surf, RED, (ex,   head_y-1), 3)
+            pygame.draw.circle(surf, RED, (ex+7, head_y-1), 3)
+            pygame.draw.line(surf, PINK, (rx, body_y+6), (rx+self.w, body_y+6), 1)
+            pygame.draw.line(surf, PINK, (rx, body_y+14), (rx+self.w, body_y+14), 1)
 
         elif self.etype == "drone":
             cx2, cy2 = rx + self.w//2, ry + self.h//2
-            pts = [(cx2+int(14*math.cos(math.radians(a))),
-                    cy2+int(9 *math.sin(math.radians(a)))) for a in range(0,360,60)]
+            rot = (self.anim_t * 2) % 360
+            pts = [(cx2+int(14*math.cos(math.radians(a+rot))),
+                    cy2+int(9 *math.sin(math.radians(a+rot)))) for a in range(0,360,60)]
+            bob = int(math.sin(t) * 2)
+            pts = [(p[0], p[1] + bob) for p in pts]
             pygame.draw.polygon(surf, col, pts)
             pygame.draw.polygon(surf, CYAN, pts, 2)
-            pygame.draw.circle(surf, CYAN, (cx2, cy2), 4)
-            glow_circle(surf, CYAN, cx2, cy2, 12, 55)
+            pygame.draw.circle(surf, CYAN, (cx2, cy2 + bob), 4)
+            glow_circle(surf, CYAN, cx2, cy2 + bob, 12, 55)
 
         elif self.etype == "mutante":
-            pygame.draw.rect(surf, col, (rx+4, ry+22, self.w-8, self.h-22), border_radius=5)
-            pygame.draw.circle(surf, col, (rx+self.w//2, ry+20), 20)
+            breath = 1.0 + 0.04 * math.sin(t)
+            bw, bh = int((self.w-8) * breath), self.h-22
+            bx = rx + 4 - (bw - (self.w-8))//2
+            pygame.draw.rect(surf, col, (bx, ry+22, bw, bh), border_radius=5)
+            pygame.draw.circle(surf, col, (rx+self.w//2, ry+20), int(20 * breath))
             for i in range(3):
                 sx2 = rx + 6 + i*14
                 pygame.draw.polygon(surf, ORANGE,
@@ -654,9 +706,12 @@ class Enemy:
             pygame.draw.circle(surf, RED, (rx+self.w//2+6, ry+16), 4)
 
         elif self.etype == "jefe":
-            glow_circle(surf, PURPLE, rx+self.w//2, ry+self.h//2, 55, 70)
+            pulse = 0.85 + 0.15 * math.sin(t * 1.5)
+            r_glow = int(55 * pulse)
+            glow_circle(surf, PURPLE, rx+self.w//2, ry+self.h//2, r_glow, 70)
+            breath = 1.0 + 0.03 * math.sin(t)
             pygame.draw.rect(surf, col, (rx, ry+32, self.w, self.h-32), border_radius=8)
-            pygame.draw.circle(surf, col, (rx+self.w//2, ry+30), 32)
+            pygame.draw.circle(surf, col, (rx+self.w//2, ry+30), int(32 * breath))
             ec = PURPLE if self.phase < 2 else PINK
             for off in (-12, 12):
                 pygame.draw.circle(surf, ec, (rx+self.w//2+off, ry+26), 6)
