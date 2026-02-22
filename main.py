@@ -63,6 +63,101 @@ screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 W, H = screen.get_size()
 clock  = pygame.time.Clock()
 
+# ─────────────────────────────────────────────────────────
+# SPRITES JUGADOR (reemplaza dibujo procedural)
+# ─────────────────────────────────────────────────────────
+BASE_DIR = os.path.dirname(__file__)
+
+def _load_image_from_images(*names):
+    for n in names:
+        p = os.path.join(BASE_DIR, "images", n)
+        if os.path.isfile(p):
+            return pygame.image.load(p).convert_alpha()
+    raise FileNotFoundError(
+        f"No encontré el spritesheet en /images. Probé: {names}"
+    )
+
+def _slice_trim_scale(sheet, rect: pygame.Rect, target_h: int):
+    """Corta rect, recorta transparencia alrededor y escala a altura target_h.
+    Si rect se sale del sheet, se recorta al área válida."""
+    bounds = sheet.get_rect()
+    rect = rect.clip(bounds)
+    if rect.width <= 0 or rect.height <= 0:
+        out = pygame.Surface((1, target_h or 1), pygame.SRCALPHA)
+        return out
+    surf = sheet.subsurface(rect).copy()
+    br = surf.get_bounding_rect()
+    if br.width <= 0 or br.height <= 0:
+        out = pygame.Surface((1, target_h or 1), pygame.SRCALPHA)
+        return out
+    surf = surf.subsurface(br).copy()
+
+    if target_h is not None:
+        scale = target_h / max(1, surf.get_height())
+        w = max(1, int(surf.get_width() * scale))
+        surf = pygame.transform.smoothscale(surf, (w, target_h))
+    return surf
+
+# Ajusta esta altura si quieres el personaje más grande/pequeño en pantalla
+PLAYER_SPRITE_H = 96
+
+# Carga con fallback por si el nombre está mal escrito
+_player_sheet = _load_image_from_images("spites.png", "spirtes.png", "sprites.png")
+
+# Coordenadas (basadas en tu sheet):
+# - Filas:
+#   Run:   y=64..485   (5 columnas iguales)
+#   Idle:  y=574..991  (6 frames con anchos distintos)
+#   Slash: y=1035..1546 (usaremos 3 primeros frames)
+#   Shoot: y=1595..2035 (5 columnas iguales)
+
+RUN_Y0, RUN_H   = 64,   (485 - 64 + 1)
+IDLE_Y0, IDLE_H = 574,  (991 - 574 + 1)
+SLASH_Y0, SLASH_H = 1035, (1546 - 1035 + 1)
+SHOOT_Y0, SHOOT_H = 1595, (2035 - 1595 + 1)
+
+CELL_W_5 = _player_sheet.get_width() // 5  # 1365//5 = 273
+
+# RUN (5 frames)
+SPR_RUN_R = [
+    _slice_trim_scale(_player_sheet, pygame.Rect(i*CELL_W_5, RUN_Y0, CELL_W_5, RUN_H), PLAYER_SPRITE_H)
+    for i in range(5)
+]
+
+# IDLE (6 frames con x-ranges específicos)
+_idle_xranges = [
+    (0,   173),
+    (224, 410),
+    (467, 650),
+    (704, 895),
+    (936, 1134),
+    (1194, 1364),
+]
+SPR_IDLE_R = [
+    _slice_trim_scale(_player_sheet,
+                      pygame.Rect(x0, IDLE_Y0, (x1-x0+1), IDLE_H),
+                      PLAYER_SPRITE_H)
+    for (x0, x1) in _idle_xranges
+]
+
+# SLASH (usa los 3 primeros "celdas" de la fila de ataques)
+SPR_SLASH_R = [
+    _slice_trim_scale(_player_sheet, pygame.Rect(i*CELL_W_5, SLASH_Y0, CELL_W_5, SLASH_H), PLAYER_SPRITE_H)
+    for i in range(3)
+]
+
+# SHOOT (5 frames)
+SPR_SHOOT_R = [
+    _slice_trim_scale(_player_sheet, pygame.Rect(i*CELL_W_5, SHOOT_Y0, CELL_W_5, SHOOT_H), PLAYER_SPRITE_H)
+    for i in range(5)
+]
+
+# Versiones "mirrored" para mirar a la izquierda
+SPR_RUN_L   = [pygame.transform.flip(s, True, False) for s in SPR_RUN_R]
+SPR_IDLE_L  = [pygame.transform.flip(s, True, False) for s in SPR_IDLE_R]
+SPR_SLASH_L = [pygame.transform.flip(s, True, False) for s in SPR_SLASH_R]
+SPR_SHOOT_L = [pygame.transform.flip(s, True, False) for s in SPR_SHOOT_R]
+
 try:
     FNT_BIG = pygame.font.SysFont("consolas", 52, bold=True)
     FNT_MED = pygame.font.SysFont("consolas", 30, bold=True)
@@ -333,7 +428,7 @@ class Player:
                 self.vx = lerp(self.vx, mv * 5.6, 0.22)
             self.walk_t += 1
             if self.walk_t % 7 == 0:
-                self.walk_fr = (self.walk_fr + 1) % 4
+                self.walk_fr = (self.walk_fr + 1) % len(SPR_RUN_R)
         else:
             if self.dash_timer <= 0:
                 self.vx = lerp(self.vx, 0, 0.18)
@@ -406,75 +501,48 @@ class Player:
 
     def draw(self, surf, ox, oy):
         rx, ry = int(self.x - ox), int(self.y - oy)
-        blink     = self.hurt_t > 0 and (self.hurt_t // 3) % 2 == 0
-        body_col  = RED if blink else (45, 55, 75)
-        armor_col = (75, 85, 115) if not blink else RED
-        suit_col  = (28, 36, 55)
 
-        # Animación: squash al aterrizar, inclinación al correr, estiramiento en salto
-        t = self.anim_t * 0.12
-        land_squash = 0
-        if self.land_t > 0:
-            land_squash = (self.land_t / 14.0) * 0.25
-        run_tilt = 0
-        if abs(self.vx) > 0.5 and self.on_ground and self.dash_timer <= 0:
-            run_tilt = self.facing * min(0.15, abs(self.vx) / 40.0)
-        jump_stretch = 0
-        if not self.on_ground and self.dash_timer <= 0:
-            jump_stretch = -0.03 * max(-1, min(1, self.vy / 8.0))
-        idle_breath = 0.02 * math.sin(t) if abs(self.vx) < 0.3 and self.on_ground else 0
+        # Blink cuando recibe daño (igual que antes)
+        if self.hurt_t > 0 and (self.hurt_t // 3) % 2 == 0:
+            return
 
-        # Piernas animadas (ciclo de carrera más fluido)
-        leg_phase = (self.anim_t * 0.35) % (2 * math.pi)
-        lsp = int(math.sin(leg_phase) * 6) if abs(self.vx) > 0.5 else int(math.sin(t) * 2)
-        lsp2 = int(math.sin(leg_phase + math.pi) * 6) if abs(self.vx) > 0.5 else int(math.sin(t + 1) * 2)
-        leg_y_off = int(land_squash * 4)
-        pygame.draw.rect(surf, suit_col,   (rx+4,     ry+34+leg_y_off, 10, 18-leg_y_off), border_radius=3)
-        pygame.draw.rect(surf, suit_col,   (rx+16,    ry+34+leg_y_off, 10, 18-leg_y_off), border_radius=3)
-        pygame.draw.rect(surf, (18,18,28), (rx+2+lsp, ry+49, 13,  5))
-        pygame.draw.rect(surf, (18,18,28), (rx+15+lsp2, ry+49, 13,  5))
+        # Selección de animación
+        facing_left = self.facing < 0
 
-        # Cuerpo con squash/tilt/breath
-        body_w = int(26 + land_squash * 8 - abs(jump_stretch) * 10)
-        body_h = int(16 - land_squash * 4 + jump_stretch * 20)
-        body_x = rx + 2 + int(idle_breath * 3)
-        body_y = ry + 20 + int(land_squash * 2)
-        pygame.draw.rect(surf, body_col,  (body_x, body_y, body_w, body_h), border_radius=4)
-        pygame.draw.rect(surf, armor_col, (body_x, body_y-2, body_w, 8), border_radius=3)
+        # Prioridad: slash > shoot > aire > run > idle
+        if self.slash_cd > 0:
+            # slash_cd arranca en 20 (en tu do_slash)
+            t = 20 - self.slash_cd
+            idx = min(len(SPR_SLASH_R) - 1, t // 7)  # 0..2
+            frame = (SPR_SLASH_L if facing_left else SPR_SLASH_R)[idx]
 
-        # Brazo con implante
-        imp_x = rx + self.PW + 2 if self.facing > 0 else rx - 10
-        imp_y = ry + 22 + int(run_tilt * 6)
-        pygame.draw.rect(surf, suit_col, (imp_x, imp_y, 8, 12), border_radius=3)
-        ic = PURPLE if self.neural_t > 0 else CYAN
-        glow_circle(surf, ic, imp_x + 4, imp_y + 6, 9, 80)
+        elif self.shoot_cd > 0:
+            # shoot_cd arranca en 14 (en tu do_shoot)
+            t = 14 - self.shoot_cd
+            idx = min(len(SPR_SHOOT_R) - 1, t // 3)  # 0..4
+            frame = (SPR_SHOOT_L if facing_left else SPR_SHOOT_R)[idx]
 
-        # Cabeza con ligero movimiento
-        head_x = rx + 15 + int(run_tilt * 8) + int(idle_breath * 2)
-        head_y = ry + 13 + int(land_squash * 2)
-        pygame.draw.circle(surf, body_col, (head_x, head_y), 13)
-        pygame.draw.arc(surf, suit_col,
-                        pygame.Rect(head_x-14, head_y-12, 28, 20),
-                        math.radians(10), math.radians(170), 5)
-        ex = head_x + (4 if self.facing > 0 else -4)
-        pygame.draw.circle(surf, RED, (ex, head_y), 4)
-        glow_circle(surf, RED, ex, head_y, 8, 110)
+        elif not self.on_ground:
+            # En aire: usa un idle estable (puedes cambiarlo por otro frame si quieres)
+            frame = (SPR_IDLE_L if facing_left else SPR_IDLE_R)[0]
 
-        # Katana (ángulo según ataque o dash)
-        kx  = rx + (self.PW + 4 if self.facing > 0 else -16)
-        ky  = ry + 20 + int(run_tilt * 4)
-        bk  = CYAN if self.slash_cd > 14 else (140, 200, 255)
-        slash_ang = 0.4 if self.slash_cd > 10 else 0.6
-        ex2 = kx + self.facing * int(20 * math.cos(slash_ang))
-        ey2 = ky + int(17 * math.sin(slash_ang))
-        pygame.draw.line(surf, (70, 70, 85), (kx, ky), (ex2, ey2), 4)
-        pygame.draw.line(surf, bk,           (kx, ky), (ex2, ey2), 2)
-        glow_circle(surf, bk, ex2, ey2, 7, 80)
+        elif abs(self.vx) > 0.6:
+            frame = (SPR_RUN_L if facing_left else SPR_RUN_R)[self.walk_fr % len(SPR_RUN_R)]
 
-        # Aura neural
+        else:
+            idx = (self.anim_t // 10) % len(SPR_IDLE_R)
+            frame = (SPR_IDLE_L if facing_left else SPR_IDLE_R)[idx]
+
+        # Aura neural (detrás del sprite)
         if self.neural_t > 0:
-            glow_circle(surf, PURPLE, rx + 15, ry + 25, 52, 55)
+            glow_circle(surf, PURPLE, rx + self.PW // 2, ry + self.PH // 2, 52, 55)
 
+        # Dibujar alineando "pies" con el collider (bottom-align)
+        px = rx + self.PW // 2 - frame.get_width() // 2
+        py = ry + self.PH - frame.get_height()
+        surf.blit(frame, (px, py))
+
+        # Mantén tus SlashEffects (si quieres el arco de corte encima)
         for se in self.slash_effects:
             se.draw(surf, ox, oy)
 
