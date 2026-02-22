@@ -160,6 +160,18 @@ except Exception as e:
     print(f"⚠️ Error al cargar el sonido de muerte: {e}")
     SND_GAME_OVER = None
 
+    # Cargar música de fondo
+MUSIC_PATH = os.path.join(BASE_DIR, "sounds", "background_music.wav")
+print(f"🔊 Buscando música de fondo en: {MUSIC_PATH}")
+print(f"🔊 ¿Existe el archivo? {os.path.exists(MUSIC_PATH)}")
+
+try:
+    pygame.mixer.music.load(MUSIC_PATH)
+    pygame.mixer.music.set_volume(0.3)  # Volumen más bajo para no tapar efectos
+    print("✅ Música de fondo cargada correctamente")
+except Exception as e:
+    print(f"⚠️ Error al cargar la música de fondo: {e}")
+
 # ─────────────────────────────────────────────────────────
 # SPRITES JUGADOR (reemplaza dibujo procedural)
 # ─────────────────────────────────────────────────────────
@@ -1386,6 +1398,12 @@ def run():
         player = Player(80, 530)
         ab.check_unlocks(player.level, player.abilities)
         reset_level(level_n, player, 0)
+        # Reproducir música de fondo en loop infinito
+        try:
+            pygame.mixer.music.play(-1)  # -1 significa loop infinito
+            print("🎵 Música de fondo iniciada")
+        except:
+            print("⚠️ No se pudo reproducir la música de fondo")
 
     while True:
         dt = clock.tick(FPS)
@@ -1396,7 +1414,7 @@ def run():
         world_mx = mx + int(cam_x)
         world_my = my + int(cam_y)
 
-        # ── EVENTOS ───────────────────────────────────────
+            # ── EVENTOS ───────────────────────────────────────
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -1406,27 +1424,41 @@ def run():
                 if event.key == pygame.K_ESCAPE:
                     if state == "playing":
                         state = "pause"
+                        pygame.mixer.music.pause()  # Pausar música
+                        print("🎵 Música pausada")
                     elif state == "pause":
                         state = "playing"
+                        pygame.mixer.music.unpause()  # Reanudar música
+                        print("🎵 Música reanudada")
                     else:
                         pygame.quit()
                         sys.exit()
+                        
                 if event.key == pygame.K_F1 and state in ("playing", "pause"):
                     global DEBUG
                     DEBUG = not DEBUG
 
                 if state == "pause" and event.key == pygame.K_q:
                     state = "title"
+                    pygame.mixer.music.stop()  # Detener música al salir al título
+                    print("🎵 Música detenida")
 
                 if state == "title" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     state = "playing"
                     restart_game()
+
+                    # La música se inicia dentro de restart_game()
 
                 if event.key == pygame.K_r:
                     if state == "dead":
                         state = "playing"
                         # Reiniciar desde el último checkpoint
                         reset_level(level_n, player, last_checkpoint_idx)
+                        # Asegurar que la música siga sonando
+                        try:
+                            pygame.mixer.music.unpause()
+                        except:
+                            pass
                     elif state == "win":
                         state = "playing"
                         restart_game()
