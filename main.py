@@ -33,6 +33,7 @@ import minimap as mm
 from data.load_stats import get_enemy_stats
 
 pygame.init()
+pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
 
 DEBUG = False  # F1 para toggle
 TILE_CELL = 128  # celdas para grid de colisión de balas
@@ -43,6 +44,7 @@ pygame.display.set_caption("NEUROCALIPSIS: El Último Fragmento")
 # ─────────────────────────────────────────────────────────
 FPS  = 60
 GRAV = 0.58
+FALL_DEATH_Y = 2000  # Si el jugador cae por debajo de esta Y, muere
 
 # Paleta cyberpunk
 BG1      = (4,   4,  14)
@@ -64,10 +66,103 @@ W, H = screen.get_size()
 clock  = pygame.time.Clock()
 
 # ─────────────────────────────────────────────────────────
-# SPRITES JUGADOR (reemplaza dibujo procedural)
+# CARGAR SONIDOS
 # ─────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
 
+print(f"📁 Directorio actual: {BASE_DIR}")
+print(f"🔊 Buscando sonido en: {os.path.join(BASE_DIR, 'sounds', 'slash.wav')}")
+print(f"🔊 ¿Existe el archivo? {os.path.exists(os.path.join(BASE_DIR, 'sounds', 'slash.wav'))}")
+
+try:
+    SND_SLASH = pygame.mixer.Sound(os.path.join(BASE_DIR, "sounds", "slash.wav"))
+    SND_SLASH.set_volume(0.6)
+    print("✅ Sonido de espada cargado correctamente")
+except FileNotFoundError:
+    print("⚠️ No se encontró el archivo de sonido: sounds/slash.wav")
+    SND_SLASH = None
+except Exception as e:
+    print(f"⚠️ Error al cargar el sonido: {e}")
+    SND_SLASH = None
+
+# Cargar sonido de descarga neural (tecla L)
+print(f"🔊 Buscando sonido de descarga en: {os.path.join(BASE_DIR, 'sounds', 'neural.wav')}")
+print(f"🔊 ¿Existe el archivo de descarga? {os.path.exists(os.path.join(BASE_DIR, 'sounds', 'neural.wav'))}")
+
+try:
+    SND_NEURAL = pygame.mixer.Sound(os.path.join(BASE_DIR, "sounds", "neural.wav"))
+    SND_NEURAL.set_volume(0.8)
+    print("✅ Sonido de descarga neural cargado correctamente")
+except FileNotFoundError:
+    print("⚠️ No se encontró el archivo de sonido: sounds/neural.wav")
+    SND_NEURAL = None
+except Exception as e:
+    print(f"⚠️ Error al cargar el sonido de descarga: {e}")
+    SND_NEURAL = None
+
+# Cargar sonido de pistola (tecla K)
+print(f"🔊 Buscando sonido de pistola en: {os.path.join(BASE_DIR, 'sounds', 'shoot.wav')}")
+print(f"🔊 ¿Existe el archivo de pistola? {os.path.exists(os.path.join(BASE_DIR, 'sounds', 'shoot.wav'))}")
+
+try:
+    SND_SHOOT = pygame.mixer.Sound(os.path.join(BASE_DIR, "sounds", "shoot.wav"))
+    SND_SHOOT.set_volume(0.5)
+    print("✅ Sonido de pistola cargado correctamente")
+except FileNotFoundError:
+    print("⚠️ No se encontró el archivo de sonido: sounds/shoot.wav")
+    SND_SHOOT = None
+except Exception as e:
+    print(f"⚠️ Error al cargar el sonido de pistola: {e}")
+    SND_SHOOT = None
+
+# Cargar sonido de recarga (tecla R)
+print(f"🔊 Buscando sonido de recarga en: {os.path.join(BASE_DIR, 'sounds', 'reload.wav')}")
+print(f"🔊 ¿Existe el archivo de recarga? {os.path.exists(os.path.join(BASE_DIR, 'sounds', 'reload.wav'))}")
+
+try:
+    SND_RELOAD = pygame.mixer.Sound(os.path.join(BASE_DIR, "sounds", "reload.wav"))
+    SND_RELOAD.set_volume(0.6)
+    print("✅ Sonido de recarga cargado correctamente")
+except FileNotFoundError:
+    print("⚠️ No se encontró el archivo de sonido: sounds/reload.wav")
+    SND_RELOAD = None
+except Exception as e:
+    print(f"⚠️ Error al cargar el sonido de recarga: {e}")
+    SND_RELOAD = None
+
+# Cargar sonido de salto (SPACE / W / UP)
+print(f"🔊 Buscando sonido de salto en: {os.path.join(BASE_DIR, 'sounds', 'jump.wav')}")
+print(f"🔊 ¿Existe el archivo de salto? {os.path.exists(os.path.join(BASE_DIR, 'sounds', 'jump.wav'))}")
+
+try:
+    SND_JUMP = pygame.mixer.Sound(os.path.join(BASE_DIR, "sounds", "jump.wav"))
+    SND_JUMP.set_volume(0.5)
+    print("✅ Sonido de salto cargado correctamente")
+except FileNotFoundError:
+    print("⚠️ No se encontró el archivo de sonido: sounds/jump.wav")
+    SND_JUMP = None
+except Exception as e:
+    print(f"⚠️ Error al cargar el sonido de salto: {e}")
+    SND_JUMP = None
+
+# Cargar sonido de muerte (game over)
+print(f"🔊 Buscando sonido de muerte en: {os.path.join(BASE_DIR, 'sounds', 'game_over.wav')}")
+print(f"🔊 ¿Existe el archivo? {os.path.exists(os.path.join(BASE_DIR, 'sounds', 'game_over.wav'))}")
+
+try:
+    SND_GAME_OVER = pygame.mixer.Sound(os.path.join(BASE_DIR, "sounds", "game_over.wav"))
+    SND_GAME_OVER.set_volume(0.7)
+    print("✅ Sonido de muerte cargado correctamente")
+except FileNotFoundError:
+    print("⚠️ No se encontró el archivo de sonido: sounds/game_over.wav")
+    SND_GAME_OVER = None
+except Exception as e:
+    print(f"⚠️ Error al cargar el sonido de muerte: {e}")
+    SND_GAME_OVER = None
+
+# ─────────────────────────────────────────────────────────
+# SPRITES JUGADOR (reemplaza dibujo procedural)
+# ─────────────────────────────────────────────────────────
 def _load_image_from_images(*names):
     for n in names:
         p = os.path.join(BASE_DIR, "images", n)
@@ -342,7 +437,9 @@ class Player:
 
         self.hp = self.max_hp = 150
         self.ammo = self.max_ammo = 30
-        self.xp = 0; self.level = 1; self.xp_to_next = 100
+        self.xp = 0
+        self.level = 1
+        self.xp_to_next = 100
 
         self.slash_cd  = 0
         self.shoot_cd  = 0
@@ -368,29 +465,42 @@ class Player:
         self.land_t = 0
         self.anim_t = 0
         self.was_on_ground = True
+        self.fall_timer = 0
 
     @property
-    def rect(self): return pygame.Rect(int(self.x), int(self.y), self.PW, self.PH)
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y), self.PW, self.PH)
+
     @property
-    def cx(self): return self.x + self.PW / 2
+    def cx(self):
+        return self.x + self.PW / 2
+
     @property
-    def cy(self): return self.y + self.PH / 2
+    def cy(self):
+        return self.y + self.PH / 2
 
     def take_damage(self, d):
-        if self.inv_t > 0 or self.neural_t > 0: return
+        if self.inv_t > 0 or self.neural_t > 0:
+            return
         self.hp = max(0, self.hp - d)
-        self.hurt_t = 20; self.inv_t = 50
-        if self.hp == 0: self.dead = True
+        self.hurt_t = 20
+        self.inv_t = 50
+        if self.hp == 0:
+            self.dead = True
+            # Reproducir sonido de muerte
+            if 'SND_GAME_OVER' in globals() and SND_GAME_OVER:
+                SND_GAME_OVER.play()
+                print("💀 ¡Personaje muerto!")
 
     def gain_xp(self, xp):
         self.xp += xp
         leveled = False
         while self.xp >= self.xp_to_next:
-            self.xp      -= self.xp_to_next
-            self.level   += 1
+            self.xp -= self.xp_to_next
+            self.level += 1
             self.xp_to_next = int(self.xp_to_next * 1.6)
-            self.max_hp  += 25
-            self.hp       = min(self.hp + 40, self.max_hp)
+            self.max_hp += 25
+            self.hp = min(self.hp + 40, self.max_hp)
             self.max_ammo += 5
             spawn(self.cx, self.cy, GOLD, 22, 5, 55, 7)
             self.levelup_t = 130
@@ -399,31 +509,50 @@ class Player:
         return leveled
 
     def do_slash(self):
-        if self.slash_cd > 0: return
-        self.combo   = (self.combo % 3) + 1
+        if self.slash_cd > 0:
+            return
+        self.combo = (self.combo % 3) + 1
         self.combo_t = 35
         dmg = int((50 + (self.level-1)*8) * (1.7 if self.combo == 3 else 1.0))
         self.slash_effects.append(SlashEffect(self.cx, self.cy, self.facing, dmg))
         spawn(self.cx + self.facing*42, self.cy, CYAN, 10, 4, 20, 4)
         self.slash_cd = 20
 
+        # Reproducir sonido de espada
+        if 'SND_SLASH' in globals() and SND_SLASH:
+            SND_SLASH.play()
+
     def do_shoot(self, wmx, wmy):
-        if self.shoot_cd > 0 or self.ammo <= 0: return None
-        self.ammo    -= 1
+        if self.shoot_cd > 0 or self.ammo <= 0:
+            return None
+        self.ammo -= 1
         self.shoot_cd = 14
-        dx = wmx - self.cx; dy = wmy - self.cy
+        dx = wmx - self.cx
+        dy = wmy - self.cy
         spawn(self.cx + self.facing*18, self.cy, CYAN, 4, 3, 10, 3)
+
+        # Reproducir sonido de pistola
+        if 'SND_SHOOT' in globals() and SND_SHOOT:
+            SND_SHOOT.play()
+            print("🔫 ¡Disparo!")
+
         return Bullet(self.cx, self.cy, dx, dy, 22+(self.level-1)*4, CYAN, 14, "player")
 
     def do_neural(self):
-        if self.neural_cd > 0: return
-        self.neural_t  = 200
+        if self.neural_cd > 0:
+            return
+        self.neural_t = 200
         self.neural_cd = 600
         spawn(self.cx, self.cy, PURPLE, 30, 6, 65, 7)
 
+        # Reproducir sonido de descarga neural
+        if 'SND_NEURAL' in globals() and SND_NEURAL:
+            SND_NEURAL.play()
+            print("⚡ ¡Descarga Neural activada!")
+
     def update(self, keys, tiles):
-        for attr in ("slash_cd","shoot_cd","neural_cd","hurt_t","inv_t",
-                     "neural_t","combo_t","levelup_t","dash_timer","dash_cooldown"):
+        for attr in ("slash_cd", "shoot_cd", "neural_cd", "hurt_t", "inv_t",
+                     "neural_t", "combo_t", "levelup_t", "dash_timer", "dash_cooldown"):
             setattr(self, attr, max(0, getattr(self, attr, 0) - 1))
 
         if self.on_ground:
@@ -433,7 +562,8 @@ class Player:
         self.wall_side = 0
         r = self.rect
         for t in tiles:
-            if r.colliderect(t): continue
+            if r.colliderect(t):
+                continue
             if self.vy != 0 or not self.on_ground:
                 if self.x + self.PW <= t.left and t.left - (self.x + self.PW) < 8 and t.top < self.y + self.PH and t.bottom > self.y:
                     self.on_wall = True
@@ -443,8 +573,10 @@ class Player:
                     self.wall_side = 1
 
         mv = 0
-        if keys[pygame.K_a] or keys[pygame.K_LEFT]:  mv = -1
-        if keys[pygame.K_d] or keys[pygame.K_RIGHT]: mv =  1
+        if keys[pygame.K_a] or keys[pygame.K_LEFT]:
+            mv = -1
+        if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
+            mv = 1
         if mv:
             self.facing = mv
             if self.dash_timer <= 0:
@@ -470,16 +602,28 @@ class Player:
                 self.on_ground = False
                 self.jumps_left -= 1
                 spawn(self.cx, self.y + self.PH, CYAN, 6, 2, 14, 3)
+                # Reproducir sonido de salto
+                if 'SND_JUMP' in globals() and SND_JUMP:
+                    SND_JUMP.play()
+                    print("🦶 ¡Salto!")
             elif ab.has_ability(self.abilities, ab.ABILITY_DOUBLE_JUMP) and self.jumps_left > 0 and self.dash_timer <= 0:
                 self.vy = -14.2
                 self.jumps_left -= 1
                 spawn(self.cx, self.cy, GOLD, 10, 3, 20, 4)
+                # Reproducir sonido de doble salto
+                if 'SND_JUMP' in globals() and SND_JUMP:
+                    SND_JUMP.play()
+                    print("🦶 ¡Doble salto!")
             elif ab.has_ability(self.abilities, ab.ABILITY_WALL_JUMP) and self.on_wall and self.dash_timer <= 0:
                 self.vy = -13
                 self.vx = -self.wall_side * 10
                 self.facing = -self.wall_side
                 self.on_wall = False
                 spawn(self.cx, self.cy, CYAN, 8, 3, 16, 3)
+                # Reproducir sonido de salto de pared
+                if 'SND_JUMP' in globals() and SND_JUMP:
+                    SND_JUMP.play()
+                    print("🧱 ¡Salto de pared!")
 
         self.vy = min(self.vy + GRAV, 18)
 
@@ -488,8 +632,10 @@ class Player:
         r = self.rect
         for t in tiles:
             if r.colliderect(t):
-                if self.vx > 0: self.x = t.left - self.PW
-                else:           self.x = t.right
+                if self.vx > 0:
+                    self.x = t.left - self.PW
+                else:
+                    self.x = t.right
                 self.vx = 0
                 r = self.rect
 
@@ -507,7 +653,17 @@ class Player:
                 self.vy = 0
                 r = self.rect
 
-        self.x = max(0.0, self.x)
+        # Limitar X para que no salga del mapa
+        self.x = max(0.0, min(self.x, 9000 - self.PW))
+
+        # Detectar caída al vacío
+        if self.y > FALL_DEATH_Y:
+            self.dead = True
+            spawn(self.cx, self.y, RED, 20, 8, 40, 8)
+            # Reproducir sonido de muerte por caída
+            if 'SND_GAME_OVER' in globals() and SND_GAME_OVER:
+                SND_GAME_OVER.play()
+                print("💀 ¡Caída al vacío!")
 
         if self.on_ground:
             if not self.was_on_ground and self.vy >= 0:
@@ -520,12 +676,13 @@ class Player:
 
         for se in self.slash_effects[:]:
             se.update()
-            if not se.alive: self.slash_effects.remove(se)
+            if not se.alive:
+                self.slash_effects.remove(se)
 
     def draw(self, surf, ox, oy):
         rx, ry = int(self.x - ox), int(self.y - oy)
 
-        # Blink cuando recibe daño (igual que antes)
+        # Blink cuando recibe daño
         if self.hurt_t > 0 and (self.hurt_t // 3) % 2 == 0:
             return
 
@@ -534,19 +691,16 @@ class Player:
 
         # Prioridad: slash > shoot > aire > run > idle
         if self.slash_cd > 0:
-            # slash_cd arranca en 20 (en tu do_slash)
             t = 20 - self.slash_cd
-            idx = min(len(SPR_SLASH_R) - 1, t // 7)  # 0..2
+            idx = min(len(SPR_SLASH_R) - 1, t // 7)
             frame = (SPR_SLASH_L if facing_left else SPR_SLASH_R)[idx]
 
         elif self.shoot_cd > 0:
-            # shoot_cd arranca en 14 (en tu do_shoot)
             t = 14 - self.shoot_cd
-            idx = min(len(SPR_SHOOT_R) - 1, t // 3)  # 0..4
+            idx = min(len(SPR_SHOOT_R) - 1, t // 3)
             frame = (SPR_SHOOT_L if facing_left else SPR_SHOOT_R)[idx]
 
         elif not self.on_ground:
-            # En aire: usa un idle estable (puedes cambiarlo por otro frame si quieres)
             frame = (SPR_IDLE_L if facing_left else SPR_IDLE_R)[0]
 
         elif abs(self.vx) > 0.6:
@@ -560,12 +714,12 @@ class Player:
         if self.neural_t > 0:
             glow_circle(surf, PURPLE, rx + self.PW // 2, ry + self.PH // 2, 52, 55)
 
-        # Dibujar alineando "pies" con el collider (bottom-align)
+        # Dibujar alineando "pies" con el collider
         px = rx + self.PW // 2 - PLAYER_FRAME_W // 2
         py = ry + self.PH - PLAYER_FRAME_H
         surf.blit(frame, (px, py))
 
-        # Mantén tus SlashEffects (si quieres el arco de corte encima)
+        # Dibujar efectos de slash
         for se in self.slash_effects:
             se.draw(surf, ox, oy)
 
@@ -607,33 +761,41 @@ class Enemy:
                 self.bob = random.uniform(0, math.tau)
         elif etype == "infectado":
             self.w, self.h = 26, 42
-            self.hp = self.max_hp = 65  + sc*22
-            self.speed  = 2.3 + sc*0.3
-            self.xp_val = 20  + sc*6
-            self.col    = (175, 75, 75)
-            self.at_r   = 34; self.dmg = 12+sc*3; self.at_cd = 62
+            self.hp = self.max_hp = 65 + sc*22
+            self.speed = 2.3 + sc*0.3
+            self.xp_val = 20 + sc*6
+            self.col = (175, 75, 75)
+            self.at_r = 34
+            self.dmg = 12+sc*3
+            self.at_cd = 62
         elif etype == "drone":
             self.w, self.h = 30, 22
-            self.hp = self.max_hp = 48  + sc*16
-            self.speed  = 2.8 + sc*0.4
-            self.xp_val = 32  + sc*8
-            self.col    = (90, 90, 245)
-            self.at_r   = 350; self.dmg = 14+sc*3; self.at_cd = 88
-            self.bob    = random.uniform(0, math.tau)
+            self.hp = self.max_hp = 48 + sc*16
+            self.speed = 2.8 + sc*0.4
+            self.xp_val = 32 + sc*8
+            self.col = (90, 90, 245)
+            self.at_r = 350
+            self.dmg = 14+sc*3
+            self.at_cd = 88
+            self.bob = random.uniform(0, math.tau)
         elif etype == "mutante":
             self.w, self.h = 44, 64
             self.hp = self.max_hp = 185 + sc*55
-            self.speed  = 1.05 + sc*0.15
-            self.xp_val = 62   + sc*16
-            self.col    = (120, 60, 28)
-            self.at_r   = 54; self.dmg = 28+sc*6; self.at_cd = 82
+            self.speed = 1.05 + sc*0.15
+            self.xp_val = 62 + sc*16
+            self.col = (120, 60, 28)
+            self.at_r = 54
+            self.dmg = 28+sc*6
+            self.at_cd = 82
         elif etype == "jefe":
             self.w, self.h = 78, 96
             self.hp = self.max_hp = 650 + sc*120
-            self.speed  = 1.6
+            self.speed = 1.6
             self.xp_val = 350
-            self.col    = (60, 0, 130)
-            self.at_r   = 78; self.dmg = 38+sc*6; self.at_cd = 68
+            self.col = (60, 0, 130)
+            self.at_r = 78
+            self.dmg = 38+sc*6
+            self.at_cd = 68
         else:
             self.w, self.h = 26, 42
             self.hp = self.max_hp = 50 + sc*15
@@ -645,11 +807,16 @@ class Enemy:
             self.at_cd = 60
 
     @property
-    def cx(self): return self.x + self.w / 2
+    def cx(self):
+        return self.x + self.w / 2
+
     @property
-    def cy(self): return self.y + self.h / 2
+    def cy(self):
+        return self.y + self.h / 2
+
     @property
-    def rect(self): return pygame.Rect(int(self.x), int(self.y), self.w, self.h)
+    def rect(self):
+        return pygame.Rect(int(self.x), int(self.y), self.w, self.h)
 
     def take_damage(self, d):
         self.hp -= d
@@ -662,13 +829,13 @@ class Enemy:
         return 0
 
     def update(self, player, tiles, bullets_list):
-        self.hurt_t   = max(0, self.hurt_t   - 1)
-        self.attack_t = max(0, self.attack_t  - 1)
-        self.shoot_t  = max(0, self.shoot_t   - 1)
-        self.anim_t   += 1
+        self.hurt_t = max(0, self.hurt_t - 1)
+        self.attack_t = max(0, self.attack_t - 1)
+        self.shoot_t = max(0, self.shoot_t - 1)
+        self.anim_t += 1
 
-        dx   = player.cx - self.cx
-        dy   = player.cy - self.cy
+        dx = player.cx - self.cx
+        dy = player.cy - self.cy
         dist = math.hypot(dx, dy)
         self.slowed = player.neural_t > 0 and dist < self.aggro_r
         slow = 0.35 if player.neural_t > 0 else 1.0
@@ -686,7 +853,7 @@ class Enemy:
             self.x += self.vx
             if dist < self.at_r and self.attack_t <= 0:
                 bullets_list.append(
-                    Bullet(self.cx, self.cy, dx, dy, self.dmg, (90,90,245), 8, "enemy"))
+                    Bullet(self.cx, self.cy, dx, dy, self.dmg, (90, 90, 245), 8, "enemy"))
                 self.attack_t = self.at_cd
             return
 
@@ -723,22 +890,32 @@ class Enemy:
             self.patrol_t += 1
             self.vx = self.facing * self.speed * 0.45
             if self.patrol_t > 160:
-                self.patrol_t = 0; self.facing *= -1
+                self.patrol_t = 0
+                self.facing *= -1
 
-        self.x += self.vx; self.y += self.vy; self.vx *= 0.86
+        self.x += self.vx
+        self.y += self.vy
+        self.vx *= 0.86
         self.on_ground = False
 
         r = self.rect
         for t in tiles:
             if r.colliderect(t):
                 if self.vy > 0 and self.y + self.h - self.vy <= t.y + 5:
-                    self.y = t.y - self.h; self.vy = 0; self.on_ground = True
+                    self.y = t.y - self.h
+                    self.vy = 0
+                    self.on_ground = True
                 elif self.vy < 0:
-                    self.y = t.y + t.h; self.vy = 0
+                    self.y = t.y + t.h
+                    self.vy = 0
                 elif self.vx > 0:
-                    self.x = t.x - self.w; self.vx = -self.vx*0.3; self.facing *= -1
+                    self.x = t.x - self.w
+                    self.vx = -self.vx*0.3
+                    self.facing *= -1
                 elif self.vx < 0:
-                    self.x = t.x + t.w; self.vx = -self.vx*0.3; self.facing *= -1
+                    self.x = t.x + self.w
+                    self.vx = -self.vx*0.3
+                    self.facing *= -1
                 r = self.rect
 
         if self.etype == "jefe" and self.hp < self.max_hp * 0.5:
@@ -746,7 +923,8 @@ class Enemy:
 
     def draw(self, surf, ox, oy):
         rx, ry = int(self.x - ox), int(self.y - oy)
-        if rx < -120 or rx > W + 120: return
+        if rx < -120 or rx > W + 120:
+            return
         col = RED if self.hurt_t > 0 else self.col
         if getattr(self, "slowed", False):
             r, g, b = col
@@ -766,7 +944,7 @@ class Enemy:
             head_y = ry + 12 - atk_raise
             pygame.draw.circle(surf, col, (rx+self.w//2 + sway, head_y), 13)
             ex = rx + (10 if self.facing > 0 else 5) + sway
-            pygame.draw.circle(surf, RED, (ex,   head_y-1), 3)
+            pygame.draw.circle(surf, RED, (ex, head_y-1), 3)
             pygame.draw.circle(surf, RED, (ex+7, head_y-1), 3)
             pygame.draw.line(surf, PINK, (rx, body_y+6), (rx+self.w, body_y+6), 1)
             pygame.draw.line(surf, PINK, (rx, body_y+14), (rx+self.w, body_y+14), 1)
@@ -775,7 +953,7 @@ class Enemy:
             cx2, cy2 = rx + self.w//2, ry + self.h//2
             rot = (self.anim_t * 2) % 360
             pts = [(cx2+int(14*math.cos(math.radians(a+rot))),
-                    cy2+int(9 *math.sin(math.radians(a+rot)))) for a in range(0,360,60)]
+                    cy2+int(9 * math.sin(math.radians(a+rot)))) for a in range(0, 360, 60)]
             bob = int(math.sin(t) * 2)
             pts = [(p[0], p[1] + bob) for p in pts]
             pygame.draw.polygon(surf, col, pts)
@@ -792,7 +970,7 @@ class Enemy:
             for i in range(3):
                 sx2 = rx + 6 + i*14
                 pygame.draw.polygon(surf, ORANGE,
-                    [(sx2, ry+4), (sx2+6, ry+20), (sx2-6, ry+20)])
+                                    [(sx2, ry+4), (sx2+6, ry+20), (sx2-6, ry+20)])
             pygame.draw.circle(surf, RED, (rx+self.w//2-6, ry+16), 4)
             pygame.draw.circle(surf, RED, (rx+self.w//2+6, ry+16), 4)
 
@@ -825,7 +1003,7 @@ class Item:
         self.x, self.y = float(x), float(y)
         self.itype = itype
         self.alive = True
-        self.bob   = random.uniform(0, math.tau)
+        self.bob = random.uniform(0, math.tau)
 
     def update(self, player):
         self.bob += 0.07
@@ -845,9 +1023,9 @@ class Item:
         if -30 < sx < W+30 and -30 < sy < H+30:
             col = GREEN if self.itype == "health" else CYAN
             glow_circle(surf, col, sx, sy, 14, 80)
-            pygame.draw.rect(surf, col,   (sx-9, sy-9, 18, 18), border_radius=4)
+            pygame.draw.rect(surf, col, (sx-9, sy-9, 18, 18), border_radius=4)
             pygame.draw.rect(surf, WHITE, (sx-9, sy-9, 18, 18), 1, border_radius=4)
-            surf.blit(FNT_XS.render("+HP" if self.itype=="health" else "+AM", True, WHITE),
+            surf.blit(FNT_XS.render("+HP" if self.itype == "health" else "+AM", True, WHITE),
                       (sx - 11, sy - 22))
 
 
@@ -861,10 +1039,11 @@ class Platform:
     def draw(self, surf, ox, oy):
         rx = self.rect.x - ox
         ry = self.rect.y - oy
-        if rx > W + 80 or rx + self.rect.w < -80: return
+        if rx > W + 80 or rx + self.rect.w < -80:
+            return
         r2 = pygame.Rect(int(rx), int(ry), self.rect.w, self.rect.h)
-        pygame.draw.rect(surf, DARKBLUE,   r2, border_radius=3)
-        pygame.draw.rect(surf, (0, 55, 80),(r2.x, r2.y, r2.w, 2))
+        pygame.draw.rect(surf, DARKBLUE, r2, border_radius=3)
+        pygame.draw.rect(surf, (0, 55, 80), (r2.x, r2.y, r2.w, 2))
         for gx in range(r2.x, r2.x + r2.w + 28, 28):
             pygame.draw.line(surf, (0, 35, 55), (gx, r2.y), (gx, r2.bottom), 1)
         pygame.draw.rect(surf, (0, 50, 75), r2, 1, border_radius=3)
@@ -876,50 +1055,50 @@ class Platform:
 def build_level(n):
     gy = 610
     ground = [
-        (0,   gy, 780),   (840,  gy-50, 420), (1310, gy, 520),
-        (1880, gy-50,430), (2360, gy, 640),    (3050, gy-50,520),
+        (0, gy, 780), (840, gy-50, 420), (1310, gy, 520),
+        (1880, gy-50, 430), (2360, gy, 640), (3050, gy-50, 520),
         (3620, gy, 880),
     ]
     plats = [
-        (200,490,150,18),(400,410,170,18),(640,470,120,18),
-        (870,440,190,18),(1070,360,140,18),(1330,430,160,18),
-        (1510,320,200,18),(1760,440,155,18),(1870,310,175,18),
-        (2120,380,155,18),(2360,300,190,18),(2600,450,125,18),
-        (2810,370,160,18),(3010,285,200,18),(3200,400,140,18),
-        (3400,320,180,18),(3610,240,165,18),(3810,370,140,18),
-        (4000,300,180,18),(4200,420,160,18),
+        (200, 490, 150, 18), (400, 410, 170, 18), (640, 470, 120, 18),
+        (870, 440, 190, 18), (1070, 360, 140, 18), (1330, 430, 160, 18),
+        (1510, 320, 200, 18), (1760, 440, 155, 18), (1870, 310, 175, 18),
+        (2120, 380, 155, 18), (2360, 300, 190, 18), (2600, 450, 125, 18),
+        (2810, 370, 160, 18), (3010, 285, 200, 18), (3200, 400, 140, 18),
+        (3400, 320, 180, 18), (3610, 240, 165, 18), (3810, 370, 140, 18),
+        (4000, 300, 180, 18), (4200, 420, 160, 18),
     ]
     walls = [
-        (310,420,22,190),(770,310,22,300),(1260,220,22,390),
-        (2060,350,22,260),(2760,300,22,310),(3570,220,22,390),
+        (310, 420, 22, 190), (770, 310, 22, 300), (1260, 220, 22, 390),
+        (2060, 350, 22, 260), (2760, 300, 22, 310), (3570, 220, 22, 390),
     ]
 
-    boss_x  = 4350 + n*60
-    boss_y  = gy - 96
+    boss_x = 4350 + n*60
+    boss_y = gy - 96
     world_w = boss_x + 600
 
     e_defs = [
-        (360,gy-42,"infectado"),(540,gy-42,"infectado"),(790,530,"infectado"),
-        (960,gy-42,"infectado"),(1120,310,"drone"),     (1400,gy-42,"infectado"),
-        (1620,270,"drone"),     (1820,390,"infectado"),  (2150,gy-42,"infectado"),
-        (2280,250,"drone"),     (2500,gy-42,"mutante"),  (2790,gy-42,"infectado"),
-        (3060,235,"drone"),     (3250,gy-42,"infectado"),(3440,gy-42,"mutante"),
-        (3740,190,"drone"),     (3930,250,"infectado"),  (4100,gy-42,"infectado"),
-        (4260,250,"mutante"),
+        (360, gy-42, "infectado"), (540, gy-42, "infectado"), (790, 530, "infectado"),
+        (960, gy-42, "infectado"), (1120, 310, "drone"), (1400, gy-42, "infectado"),
+        (1620, 270, "drone"), (1820, 390, "infectado"), (2150, gy-42, "infectado"),
+        (2280, 250, "drone"), (2500, gy-42, "mutante"), (2790, gy-42, "infectado"),
+        (3060, 235, "drone"), (3250, gy-42, "infectado"), (3440, gy-42, "mutante"),
+        (3740, 190, "drone"), (3930, 250, "infectado"), (4100, gy-42, "infectado"),
+        (4260, 250, "mutante"),
     ]
     if n >= 2:
-        e_defs += [(1750,290,"mutante"),(2600,370,"drone"),(3800,gy-42,"mutante")]
+        e_defs += [(1750, 290, "mutante"), (2600, 370, "drone"), (3800, gy-42, "mutante")]
     if n >= 3:
-        extras = [(ex+80, ey, "drone") for ex,ey,et in e_defs[::3]]
+        extras = [(ex+80, ey, "drone") for ex, ey, et in e_defs[::3]]
         e_defs += extras
 
     i_defs = [
-        (260,468,"health"),(700,450,"ammo"),(1100,335,"health"),
-        (1720,415,"ammo"), (2310,276,"health"),(3060,260,"ammo"),
-        (3830,346,"health"),(4150,278,"ammo"),
+        (260, 468, "health"), (700, 450, "ammo"), (1100, 335, "health"),
+        (1720, 415, "ammo"), (2310, 276, "health"), (3060, 260, "ammo"),
+        (3830, 346, "health"), (4150, 278, "ammo"),
     ]
 
-    bgs = [(4,4,14),(3,3,12),(8,0,18)]
+    bgs = [(4, 4, 14), (3, 3, 12), (8, 0, 18)]
     zones = ["ZONA I: CIUDAD DESTRUIDA",
              "ZONA II: LABORATORIOS ABANDONADOS",
              "ZONA III: FORTALEZA FINAL"]
@@ -933,9 +1112,9 @@ def build_level(n):
         tile_rects.append(pygame.Rect(wx, wy, ww, wh))
 
     plat_objs = [Platform(r) for r in tile_rects]
-    enemies   = [Enemy(ex, ey, et, n) for ex,ey,et in e_defs]
+    enemies = [Enemy(ex, ey, et, n) for ex, ey, et in e_defs]
     enemies.append(Enemy(boss_x, boss_y, "jefe", n))
-    items = [Item(ix, iy, it) for ix,iy,it in i_defs]
+    items = [Item(ix, iy, it) for ix, iy, it in i_defs]
     checkpoints = [(80, 530), (1200, 560), (2500, 560), (3800, 560)]
 
     return tile_rects, plat_objs, enemies, items, world_w, bgs[n-1], zones[n-1], checkpoints
@@ -953,38 +1132,40 @@ def draw_bg(surf, cam_x, cam_y, bg_col, level_num, tick):
         sy = (rng.randint(0, 700) - int(cam_y*0.05)) % H
         sc = (CYAN, PURPLE, PINK)[rng.randrange(3)]
         pulse = int(70 + 35*math.sin(tick*0.04 + rng.random()*6))
-        r2,g2,b2 = sc
+        r2, g2, b2 = sc
         pygame.draw.circle(surf,
-            (r2*pulse//255, g2*pulse//255, b2*pulse//255),
-            (sx, sy), rng.randint(1,3))
+                           (r2*pulse//255, g2*pulse//255, b2*pulse//255),
+                           (sx, sy), rng.randint(1, 3))
 
     rng2 = random.Random(77 + level_num)
     if level_num == 1:
         for i in range(16):
-            bw = rng2.randint(55,115); bh = rng2.randint(80,340)
-            bx = (rng2.randint(0,4800) - int(cam_x*0.14)) % W
+            bw = rng2.randint(55, 115)
+            bh = rng2.randint(80, 340)
+            bx = (rng2.randint(0, 4800) - int(cam_x*0.14)) % W
             by = H - bh
-            pygame.draw.rect(surf, (12,12,22), (bx, by, bw, bh))
+            pygame.draw.rect(surf, (12, 12, 22), (bx, by, bw, bh))
             for wy2 in range(by+10, by+bh-10, 22):
                 for wx2 in range(bx+7, bx+bw-7, 15):
                     if rng2.random() > 0.45:
-                        wc = rng2.choice([(0,35,55),(35,0,55),(0,0,40)])
+                        wc = rng2.choice([(0, 35, 55), (35, 0, 55), (0, 0, 40)])
                         pygame.draw.rect(surf, wc, (wx2, wy2, 5, 7))
     elif level_num == 2:
         for _ in range(10):
-            px2 = (rng2.randint(0,4800) - int(cam_x*0.12)) % W
-            pygame.draw.line(surf, (15,25,40), (px2,0), (px2,H), rng2.randint(2,5))
+            px2 = (rng2.randint(0, 4800) - int(cam_x*0.12)) % W
+            pygame.draw.line(surf, (15, 25, 40), (px2, 0), (px2, H), rng2.randint(2, 5))
     else:
         for i in range(12):
-            tw = rng2.randint(20,50); th = rng2.randint(120,400)
-            tx2 = (rng2.randint(0,5200) - int(cam_x*0.12)) % W
+            tw = rng2.randint(20, 50)
+            th = rng2.randint(120, 400)
+            tx2 = (rng2.randint(0, 5200) - int(cam_x*0.12)) % W
             ty2 = H - th
-            pygame.draw.rect(surf, (10,0,20), (tx2, ty2, tw, th))
-            pygame.draw.line(surf, (180,0,255), (tx2+tw//2, ty2), (tx2+tw//2, ty2+th), 1)
+            pygame.draw.rect(surf, (10, 0, 20), (tx2, ty2, tw, th))
+            pygame.draw.line(surf, (180, 0, 255), (tx2+tw//2, ty2), (tx2+tw//2, ty2+th), 1)
 
     # scanlines
     for sy in range(0, H, 4):
-        pygame.draw.line(surf, (0,0,0), (0,sy), (W,sy))
+        pygame.draw.line(surf, (0, 0, 0), (0, sy), (W, sy))
     scan_y = (tick * 3) % (H + 60) - 30
     ss = pygame.Surface((W, 3), pygame.SRCALPHA)
     ss.fill((0, 230, 220, 12))
@@ -997,17 +1178,17 @@ def draw_bg(surf, cam_x, cam_y, bg_col, level_num, tick):
 def draw_hud(surf, player, zone_name, score, boss):
     ps = pygame.Surface((248, 130), pygame.SRCALPHA)
     pygame.draw.rect(ps, (0, 10, 28, 185), (0, 0, 248, 130), border_radius=8)
-    pygame.draw.rect(ps, (*CYAN, 80),       (0, 0, 248, 130), 1, border_radius=8)
+    pygame.draw.rect(ps, (*CYAN, 80), (0, 0, 248, 130), 1, border_radius=8)
     surf.blit(ps, (8, 8))
 
-    txt(surf, "NEUROCALIPSIS",                 FNT_XS, CYAN,  16, 12)
+    txt(surf, "NEUROCALIPSIS", FNT_XS, CYAN, 16, 12)
     txt(surf, f"SAKÍ  ──  LVL {player.level}", FNT_SM, WHITE, 16, 28)
-    bar(surf, 16,  54, 180, 15, player.hp/player.max_hp,       RED,    label=f"HP  {player.hp}/{player.max_hp}")
-    bar(surf, 16,  74, 180, 15, player.ammo/player.max_ammo,   CYAN,   label=f"AMO {player.ammo}/{player.max_ammo}")
-    bar(surf, 16,  95, 180, 11, player.xp/player.xp_to_next,   GOLD,   label=f"XP  {player.xp}/{player.xp_to_next}")
+    bar(surf, 16, 54, 180, 15, player.hp/player.max_hp, RED, label=f"HP  {player.hp}/{player.max_hp}")
+    bar(surf, 16, 74, 180, 15, player.ammo/player.max_ammo, CYAN, label=f"AMO {player.ammo}/{player.max_ammo}")
+    bar(surf, 16, 95, 180, 11, player.xp/player.xp_to_next, GOLD, label=f"XP  {player.xp}/{player.xp_to_next}")
     nc_pct = 1 - player.neural_cd/600
     nc_col = PURPLE if nc_pct >= 1 or player.neural_t > 0 else GREY
-    bar(surf, 16, 112, 180,  9, nc_pct, nc_col, label="DESCARGA NEURAL")
+    bar(surf, 16, 112, 180, 9, nc_pct, nc_col, label="DESCARGA NEURAL")
 
     # zona / score
     zt = FNT_SM.render(zone_name, True, CYAN)
@@ -1023,17 +1204,19 @@ def draw_hud(surf, player, zone_name, score, boss):
 
     # combo
     if player.combo > 0 and player.combo_t > 0:
-        clabels = {1:"SLASH!", 2:"DOBLE SLASH!", 3:"GOLPE FINAL!"}
-        ccols   = {1:CYAN, 2:PURPLE, 3:GOLD}
+        clabels = {1: "SLASH!", 2: "DOBLE SLASH!", 3: "GOLPE FINAL!"}
+        ccols = {1: CYAN, 2: PURPLE, 3: GOLD}
         ct = FNT_MED.render(clabels[player.combo], True, ccols[player.combo])
         surf.blit(ct, (18, H//2))
 
     # boss bar
     if boss and boss.alive:
-        bw = 520; bx = W//2 - bw//2; by = H - 78
+        bw = 520
+        bx = W//2 - bw//2
+        by = H - 78
         bp = pygame.Surface((bw+20, 62), pygame.SRCALPHA)
-        pygame.draw.rect(bp, (10,0,22,200), (0,0,bw+20,62), border_radius=8)
-        pygame.draw.rect(bp, (*PURPLE,90),  (0,0,bw+20,62), 1, border_radius=8)
+        pygame.draw.rect(bp, (10, 0, 22, 200), (0, 0, bw+20, 62), border_radius=8)
+        pygame.draw.rect(bp, (*PURPLE, 90), (0, 0, bw+20, 62), 1, border_radius=8)
         surf.blit(bp, (bx-10, by-6))
         txt(surf, "LA CONCIENCIA DE LA IA", FNT_SM, PURPLE, bx, by)
         pt = FNT_XS.render(f"FASE {boss.phase}", True, PINK)
@@ -1044,7 +1227,7 @@ def draw_hud(surf, player, zone_name, score, boss):
     # aura neural
     if player.neural_t > 0:
         ns = pygame.Surface((W, H), pygame.SRCALPHA)
-        a  = int(90 * player.neural_t / 200)
+        a = int(90 * player.neural_t / 200)
         pygame.draw.rect(ns, (*PURPLE, a), (0, 0, W, H), 7)
         surf.blit(ns, (0, 0))
 
@@ -1060,16 +1243,16 @@ def draw_title(surf, tick):
     surf.fill(BG1)
     for i in range(12):
         ang = i/12 * math.tau + tick*0.012
-        px  = W//2 + int(math.cos(ang)*220)
-        py  = H//2 + int(math.sin(ang)*140)
-        glow_circle(surf, (CYAN, PURPLE, PINK)[i%3], px, py, 20, 40)
+        px = W//2 + int(math.cos(ang)*220)
+        py = H//2 + int(math.sin(ang)*140)
+        glow_circle(surf, (CYAN, PURPLE, PINK)[i % 3], px, py, 20, 40)
 
-    t1 = FNT_BIG.render("NEUROCALIPSIS",          True, CYAN)
-    t2 = FNT_MED.render("El Último Fragmento",     True, WHITE)
-    t3 = FNT_SM.render ("─" * 44,                 True, GREY)
+    t1 = FNT_BIG.render("NEUROCALIPSIS", True, CYAN)
+    t2 = FNT_MED.render("El Último Fragmento", True, WHITE)
+    t3 = FNT_SM.render("─" * 44, True, GREY)
     blink = (tick // 28) % 2 == 0
     t4 = FNT_MED.render("Presiona ENTER para comenzar" if blink else "", True, GOLD)
-    t5 = FNT_XS.render ("ESC = Salir",             True, GREY)
+    t5 = FNT_XS.render("ESC = Salir", True, GREY)
 
     y0 = H//2 - 140
     surf.blit(t1, (W//2 - t1.get_width()//2, y0))
@@ -1141,10 +1324,10 @@ def draw_overlay(surf, title, sub, col):
     surf.blit(ov, (0, 0))
     glow_circle(surf, col, W//2, H//2, 220, 60)
     t1 = FNT_BIG.render(title, True, col)
-    t2 = FNT_MED.render(sub,   True, WHITE)
-    t3 = FNT_SM.render ("R = Reiniciar   ESC = Salir", True, GREY)
+    t2 = FNT_MED.render(sub, True, WHITE)
+    t3 = FNT_SM.render("R = Reiniciar desde checkpoint   ESC = Salir", True, GREY)
     surf.blit(t1, (W//2 - t1.get_width()//2, H//2 - 90))
-    surf.blit(t2, (W//2 - t2.get_width()//2, H//2 -  4))
+    surf.blit(t2, (W//2 - t2.get_width()//2, H//2 - 4))
     surf.blit(t3, (W//2 - t3.get_width()//2, H//2 + 62))
 
 
@@ -1152,23 +1335,23 @@ def draw_overlay(surf, title, sub, col):
 # BUCLE PRINCIPAL
 # ─────────────────────────────────────────────────────────
 def run():
-    tick    = 0
-    state   = "title"
-    score   = 0
+    tick = 0
+    state = "title"
+    score = 0
     level_n = 1
 
     tiles, plat_objs, enemies, items, world_w, bg_col, zone_name, checkpoints = build_level(level_n)
     tile_grid = build_tile_grid(tiles)
-    player  = Player(80, 530)
+    player = Player(80, 530)
     ab.check_unlocks(player.level, player.abilities)
     bullets = []
-    boss    = next((e for e in enemies if e.etype == "jefe"), None)
+    boss = next((e for e in enemies if e.etype == "jefe"), None)
     last_checkpoint_idx = 0
     minimap_discovered = set()
 
     cam_x, cam_y = 0.0, 0.0
-    zone_msg_t   = 220
-    fade_in      = 255
+    zone_msg_t = 220
+    fade_in = 255
 
     def reset_level(n, p, at_checkpoint_idx=None):
         nonlocal tiles, plat_objs, enemies, items, world_w, bg_col
@@ -1186,27 +1369,38 @@ def run():
         p.x, p.y = float(cx), float(cy)
         p.vx = p.vy = 0
         p.dead = False
-        p.hp = min(p.hp, p.max_hp)
+        p.hp = p.max_hp  # Curar completamente al reiniciar
         p.inv_t = 90
+        p.ammo = p.max_ammo  # Recargar munición
         boss = next((e for e in enemies if e.etype == "jefe"), None)
         zone_msg_t = 220
         fade_in = 255
         minimap_discovered.clear()
         mm.update_discovered(minimap_discovered, player.x, player.y)
 
+    def restart_game():
+        """Reinicia el juego completamente desde el principio"""
+        nonlocal level_n, score, player, bullets, enemies, items, boss, last_checkpoint_idx
+        level_n = 1
+        score = 0
+        player = Player(80, 530)
+        ab.check_unlocks(player.level, player.abilities)
+        reset_level(level_n, player, 0)
+
     while True:
-        dt   = clock.tick(FPS)
+        dt = clock.tick(FPS)
         tick += 1
         effects.update_effects()
         keys = pygame.key.get_pressed()
-        mx, my    = pygame.mouse.get_pos()
-        world_mx  = mx + int(cam_x)
-        world_my  = my + int(cam_y)
+        mx, my = pygame.mouse.get_pos()
+        world_mx = mx + int(cam_x)
+        world_my = my + int(cam_y)
 
         # ── EVENTOS ───────────────────────────────────────
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                pygame.quit(); sys.exit()
+                pygame.quit()
+                sys.exit()
 
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
@@ -1226,39 +1420,43 @@ def run():
 
                 if state == "title" and event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
                     state = "playing"
-                    player  = Player(80, 530)
-                    score   = 0
-                    level_n = 1
-                    reset_level(level_n, player)
+                    restart_game()
 
                 if event.key == pygame.K_r:
                     if state == "dead":
                         state = "playing"
+                        # Reiniciar desde el último checkpoint
                         reset_level(level_n, player, last_checkpoint_idx)
                     elif state == "win":
                         state = "playing"
-                        player = Player(80, 530)
-                        score = 0
-                        level_n = 1
-                        reset_level(level_n, player)
+                        restart_game()
                     elif state == "playing":
                         player.ammo = player.max_ammo
+                        # Reproducir sonido de recarga
+                        if 'SND_RELOAD' in globals() and SND_RELOAD:
+                            SND_RELOAD.play()
+                            print("🔄 ¡Munición recargada!")
 
                 if state == "playing":
-                    if event.key == pygame.K_j: player.do_slash()
-                    if event.key == pygame.K_l: player.do_neural()
-                    if event.key == pygame.K_TAB: player.show_ability_menu = not player.show_ability_menu
+                    if event.key == pygame.K_j:
+                        player.do_slash()
+                    if event.key == pygame.K_l:
+                        player.do_neural()
+                    if event.key == pygame.K_TAB:
+                        player.show_ability_menu = not player.show_ability_menu
 
             if state == "playing" and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 b = player.do_shoot(world_mx, world_my)
-                if b: bullets.append(b)
+                if b:
+                    bullets.append(b)
 
         # ── UPDATE ────────────────────────────────────────
         if state == "playing" and not effects.is_hitstop_active():
             # disparar pistola con K (continuo)
             if keys[pygame.K_k]:
                 b = player.do_shoot(world_mx, world_my)
-                if b: bullets.append(b)
+                if b:
+                    bullets.append(b)
 
             player.update(keys, tiles)
 
@@ -1266,7 +1464,8 @@ def run():
             for b in bullets[:]:
                 b.update(tile_grid)
                 if not b.alive:
-                    bullets.remove(b); continue
+                    bullets.remove(b)
+                    continue
                 if b.owner == "player":
                     for e in enemies:
                         if e.alive and e.rect.collidepoint(b.x, b.y):
@@ -1284,7 +1483,8 @@ def run():
                             break
                 elif b.owner == "enemy":
                     if player.rect.collidepoint(b.x, b.y):
-                        player.take_damage(b.dmg); b.alive = False
+                        player.take_damage(b.dmg)
+                        b.alive = False
 
             # katana vs enemigos + hit feedback
             for se in player.slash_effects:
@@ -1305,12 +1505,14 @@ def run():
 
             # enemigos
             for e in enemies:
-                if e.alive: e.update(player, tiles, bullets)
+                if e.alive:
+                    e.update(player, tiles, bullets)
 
             # items
             for it in items[:]:
                 it.update(player)
-                if not it.alive: items.remove(it)
+                if not it.alive:
+                    items.remove(it)
 
             update_particles()
 
@@ -1319,7 +1521,10 @@ def run():
             # checkpoints: activar si el jugador pasa por uno
             for i, (cx, cy) in enumerate(checkpoints):
                 if abs(player.cx - cx) < 100 and abs(player.cy - cy) < 80:
-                    last_checkpoint_idx = max(last_checkpoint_idx, i)
+                    if i > last_checkpoint_idx:
+                        last_checkpoint_idx = i
+                        # Feedback visual al activar checkpoint
+                        spawn(cx, cy, GOLD, 15, 3, 30, 5)
 
             # cámara (shake se aplica al dibujar)
             cam_x = lerp(cam_x, player.cx - W/2, 0.10)
@@ -1334,7 +1539,7 @@ def run():
             if boss and not boss.alive and player.x > world_w - 400:
                 if level_n < 3:
                     level_n += 1
-                    player.hp   = min(player.hp + 55, player.max_hp)
+                    player.hp = min(player.hp + 55, player.max_hp)
                     player.ammo = player.max_ammo
                     reset_level(level_n, player)
                     boss = next((e for e in enemies if e.etype == "jefe"), None)
@@ -1351,21 +1556,26 @@ def run():
         else:
             draw_bg(screen, draw_ox, draw_oy, bg_col, level_n, tick)
 
-            for p in plat_objs: p.draw(screen, draw_ox, draw_oy)
-            for it in items:    it.draw(screen, draw_ox, draw_oy)
+            for p in plat_objs:
+                p.draw(screen, draw_ox, draw_oy)
+            for it in items:
+                it.draw(screen, draw_ox, draw_oy)
             for e in enemies:
-                if e.alive: e.draw(screen, draw_ox, draw_oy)
-            for b in bullets: b.draw(screen, draw_ox, draw_oy)
+                if e.alive:
+                    e.draw(screen, draw_ox, draw_oy)
+            for b in bullets:
+                b.draw(screen, draw_ox, draw_oy)
             draw_particles(screen, draw_ox, draw_oy)
-            if state != "dead": player.draw(screen, draw_ox, draw_oy)
+            if state != "dead":
+                player.draw(screen, draw_ox, draw_oy)
             effects.draw_damage_numbers(screen, draw_ox, draw_oy)
 
             # mensaje de zona
             if zone_msg_t > 0:
-                a  = min(255, zone_msg_t * 3)
+                a = min(255, zone_msg_t * 3)
                 zt = FNT_MED.render(zone_name, True, CYAN)
                 zs = pygame.Surface((zt.get_width()+24, zt.get_height()+12), pygame.SRCALPHA)
-                pygame.draw.rect(zs, (0,0,0,min(200,a)), zs.get_rect(), border_radius=7)
+                pygame.draw.rect(zs, (0, 0, 0, min(200, a)), zs.get_rect(), border_radius=7)
                 screen.blit(zs, (W//2 - zs.get_width()//2, 60))
                 zt.set_alpha(a)
                 screen.blit(zt, (W//2 - zt.get_width()//2, 66))
@@ -1380,10 +1590,10 @@ def run():
 
             if state == "dead":
                 draw_overlay(screen, "GAME OVER",
-                             "Sakí ha caído… la humanidad espera  ·  R = Reintentar en checkpoint", RED)
+                             f"Has caído...  Checkpoint alcanzado: {last_checkpoint_idx+1}", RED)
             elif state == "win":
                 draw_overlay(screen, "¡VICTORIA!",
-                             f"La IA fue derrotada  ·  Score: {score}", GOLD)
+                             f"La IA fue derrotada  ·  Score: {score}  ·  Nivel: {player.level}", GOLD)
             elif state == "pause":
                 draw_pause_menu(screen)
 
@@ -1392,7 +1602,9 @@ def run():
 
             # fade in
             if fade_in > 0:
-                fs = pygame.Surface((W, H)); fs.fill((0, 0, 0)); fs.set_alpha(fade_in)
+                fs = pygame.Surface((W, H))
+                fs.fill((0, 0, 0))
+                fs.set_alpha(fade_in)
                 screen.blit(fs, (0, 0))
                 fade_in = max(0, fade_in - 9)
 
