@@ -77,86 +77,109 @@ def _load_image_from_images(*names):
         f"No encontré el spritesheet en /images. Probé: {names}"
     )
 
-def _slice_trim_scale(sheet, rect: pygame.Rect, target_h: int):
-    """Corta rect, recorta transparencia alrededor y escala a altura target_h.
-    Si rect se sale del sheet, se recorta al área válida."""
+def _make_player_frame(sheet, rect: pygame.Rect, canvas_w: int, canvas_h: int, scale: float, min_alpha: int = 10):
+    """
+    1) Corta el rect
+    2) Encuentra el bounding box real (sin basurita de alpha bajo)
+    3) Pega en un CANVAS FIJO alineando al piso (bottom) y centrado
+    4) Escala con UN SOLO factor (scale) para que no "respire" ni tiemble
+    """
     bounds = sheet.get_rect()
     rect = rect.clip(bounds)
     if rect.width <= 0 or rect.height <= 0:
-        out = pygame.Surface((1, target_h or 1), pygame.SRCALPHA)
+        out = pygame.Surface((max(1, int(canvas_w * scale)), max(1, int(canvas_h * scale))), pygame.SRCALPHA)
         return out
-    surf = sheet.subsurface(rect).copy()
-    br = surf.get_bounding_rect()
-    if br.width <= 0 or br.height <= 0:
-        out = pygame.Surface((1, target_h or 1), pygame.SRCALPHA)
-        return out
-    surf = surf.subsurface(br).copy()
+    crop = sheet.subsurface(rect).copy()
 
-    if target_h is not None:
-        scale = target_h / max(1, surf.get_height())
-        w = max(1, int(surf.get_width() * scale))
-        surf = pygame.transform.smoothscale(surf, (w, target_h))
-    return surf
+    try:
+        br = crop.get_bounding_rect(min_alpha=min_alpha)
+    except TypeError:
+        br = crop.get_bounding_rect()
+    if br.w <= 0 or br.h <= 0:
+        br = crop.get_rect()
 
-# Ajusta esta altura si quieres el personaje más grande/pequeño en pantalla
-PLAYER_SPRITE_H = 96
+    canvas = pygame.Surface((canvas_w, canvas_h), pygame.SRCALPHA)
+
+    dx = (canvas_w - br.w) // 2          # centrado horizontal
+    dy = canvas_h - br.h                  # alineado al piso (bottom)
+
+    canvas.blit(crop, (dx, dy), area=br)
+
+    out_w = max(1, int(canvas_w * scale))
+    out_h = max(1, int(canvas_h * scale))
+    return pygame.transform.smoothscale(canvas, (out_w, out_h))
 
 # Carga con fallback por si el nombre está mal escrito
 _player_sheet = _load_image_from_images("spites.png", "spirtes.png", "sprites.png")
 
-# Coordenadas (basadas en tu sheet):
-# - Filas:
-#   Run:   y=64..485   (5 columnas iguales)
-#   Idle:  y=574..991  (6 frames con anchos distintos)
-#   Slash: y=1035..1546 (usaremos 3 primeros frames)
-#   Shoot: y=1595..2035 (5 columnas iguales)
+# ─────────────────────────────────────────────────────────
+# COORDENADAS PARA EL NUEVO SPRITESHEET (1024x1536)
+# Layout detectado:
+# RUN   : y 0..324    (6 frames)
+# IDLE  : y 325..614  (6 frames)
+# SLASH : y 615..937  (3 frames)
+# SHOOT : y 938..1254 (5 frames)  (la fila 5 se ignora)
+# ─────────────────────────────────────────────────────────
 
-RUN_Y0, RUN_H   = 64,   (485 - 64 + 1)
-IDLE_Y0, IDLE_H = 574,  (991 - 574 + 1)
-SLASH_Y0, SLASH_H = 1035, (1546 - 1035 + 1)
-SHOOT_Y0, SHOOT_H = 1595, (2035 - 1595 + 1)
+SHEET_W, SHEET_H = _player_sheet.get_width(), _player_sheet.get_height()
 
-CELL_W_5 = _player_sheet.get_width() // 5  # 1365//5 = 273
+RUN_Y0,   RUN_H   = 0,   325
+IDLE_Y0,  IDLE_H  = 325, 290
+SLASH_Y0, SLASH_H = 615, 323
+SHOOT_Y0, SHOOT_H = 938, 317
 
-# RUN (5 frames)
-SPR_RUN_R = [
-    _slice_trim_scale(_player_sheet, pygame.Rect(i*CELL_W_5, RUN_Y0, CELL_W_5, RUN_H), PLAYER_SPRITE_H)
-    for i in range(5)
+# Rangos X (x0, x1) por frame — ajustados para NO coger los textos
+RUN_X = [
+    (73, 201), (201, 379), (379, 537),
+    (537, 722), (722, 871), (871, 1003),
+]
+IDLE_X = [
+    (82, 223), (223, 366), (366, 498),
+    (498, 632), (632, 769), (769, 982),
+]
+SLASH_X = [
+    (121, 336), (336, 552), (552, 846),
+]
+# OJO: el frame 1 de SHOOT tiene el arma muy hacia la izquierda, por eso empieza en 110
+SHOOT_X = [
+    (110, 238), (238, 415), (415, 600),
+    (600, 783), (783, 1002),
 ]
 
-# IDLE (6 frames con x-ranges específicos)
-_idle_xranges = [
-    (0,   173),
-    (224, 410),
-    (467, 650),
-    (704, 895),
-    (936, 1134),
-    (1194, 1364),
-]
-SPR_IDLE_R = [
-    _slice_trim_scale(_player_sheet,
-                      pygame.Rect(x0, IDLE_Y0, (x1-x0+1), IDLE_H),
-                      PLAYER_SPRITE_H)
-    for (x0, x1) in _idle_xranges
-]
+# Canvas fijo (para estabilidad, sin jitter)
+_all_widths = [x1 - x0 for (x0, x1) in (RUN_X + IDLE_X + SLASH_X + SHOOT_X)]
+SRC_CANVAS_W = max(_all_widths) + 2          # +2 por seguridad
+SRC_CANVAS_H = max(RUN_H, IDLE_H, SLASH_H, SHOOT_H)
 
-# SLASH (usa los 3 primeros "celdas" de la fila de ataques)
-SPR_SLASH_R = [
-    _slice_trim_scale(_player_sheet, pygame.Rect(i*CELL_W_5, SLASH_Y0, CELL_W_5, SLASH_H), PLAYER_SPRITE_H)
-    for i in range(3)
-]
+# Tamaño final del personaje (ajústalo a gusto)
+PLAYER_SPRITE_H = 96
+SPR_SCALE = PLAYER_SPRITE_H / SRC_CANVAS_H
 
-# SHOOT (5 frames)
-SPR_SHOOT_R = [
-    _slice_trim_scale(_player_sheet, pygame.Rect(i*CELL_W_5, SHOOT_Y0, CELL_W_5, SHOOT_H), PLAYER_SPRITE_H)
-    for i in range(5)
-]
+def _build_frames(x_ranges, y0, h):
+    return [
+        _make_player_frame(
+            _player_sheet,
+            pygame.Rect(x0, y0, (x1 - x0), h),
+            SRC_CANVAS_W,
+            SRC_CANVAS_H,
+            SPR_SCALE
+        )
+        for (x0, x1) in x_ranges
+    ]
 
-# Versiones "mirrored" para mirar a la izquierda
+SPR_RUN_R   = _build_frames(RUN_X,   RUN_Y0,   RUN_H)
+SPR_IDLE_R  = _build_frames(IDLE_X,  IDLE_Y0,  IDLE_H)
+SPR_SLASH_R = _build_frames(SLASH_X, SLASH_Y0, SLASH_H)
+SPR_SHOOT_R = _build_frames(SHOOT_X, SHOOT_Y0, SHOOT_H)
+
 SPR_RUN_L   = [pygame.transform.flip(s, True, False) for s in SPR_RUN_R]
 SPR_IDLE_L  = [pygame.transform.flip(s, True, False) for s in SPR_IDLE_R]
 SPR_SLASH_L = [pygame.transform.flip(s, True, False) for s in SPR_SLASH_R]
 SPR_SHOOT_L = [pygame.transform.flip(s, True, False) for s in SPR_SHOOT_R]
+
+# Dimensiones fijas (ya no cambian entre frames)
+PLAYER_FRAME_W = SPR_RUN_R[0].get_width()
+PLAYER_FRAME_H = SPR_RUN_R[0].get_height()
 
 try:
     FNT_BIG = pygame.font.SysFont("consolas", 52, bold=True)
@@ -538,8 +561,8 @@ class Player:
             glow_circle(surf, PURPLE, rx + self.PW // 2, ry + self.PH // 2, 52, 55)
 
         # Dibujar alineando "pies" con el collider (bottom-align)
-        px = rx + self.PW // 2 - frame.get_width() // 2
-        py = ry + self.PH - frame.get_height()
+        px = rx + self.PW // 2 - PLAYER_FRAME_W // 2
+        py = ry + self.PH - PLAYER_FRAME_H
         surf.blit(frame, (px, py))
 
         # Mantén tus SlashEffects (si quieres el arco de corte encima)
