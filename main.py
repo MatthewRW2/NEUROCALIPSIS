@@ -172,6 +172,27 @@ try:
 except Exception as e:
     print(f"⚠️ Error al cargar la música de fondo: {e}")
 
+# Imágenes de items (ponlas en una carpeta assets/ o images/)
+def load_item_images():
+    images = {}
+    try:
+        img_hp = pygame.image.load(os.path.join(BASE_DIR, "assets", "Health.png")).convert_alpha()
+        img_hp = pygame.transform.scale(img_hp, (52, 52))
+        images["health"] = img_hp
+    except Exception:
+        images["health"] = None
+
+    try:
+        img_am = pygame.image.load(os.path.join(BASE_DIR, "assets", "Ammo.png")).convert_alpha()
+        img_am = pygame.transform.scale(img_am, (52, 52))
+        images["ammo"] = img_am
+    except Exception:
+        images["ammo"] = None
+
+    return images
+
+ITEM_IMAGES = load_item_images()
+
 # ─────────────────────────────────────────────────────────
 # SPRITES JUGADOR (reemplaza dibujo procedural)
 # ─────────────────────────────────────────────────────────
@@ -327,6 +348,24 @@ def glow_circle(surf, color, cx, cy, radius, alpha=70):
         pygame.draw.circle(s, (r, g, b, a), (radius * 2, radius * 2), rad)
     surf.blit(s, (cx - radius * 2, cy - radius * 2),
               special_flags=pygame.BLEND_RGBA_ADD)
+    
+def glow_buble(surf, color, cx, cy, radius, alpha=70):
+    s = pygame.Surface((radius * 4, radius * 4), pygame.SRCALPHA)
+    r, g, b = color
+
+    # Rellena el centro completamente transparente
+    # y dibuja el borde degradado de afuera hacia adentro
+    num_rings = 12
+    for i in range(num_rings):
+        ratio = i / num_rings          # 0 = exterior, 1 = interior
+        rad = max(1, int(radius * (1 - ratio * 0.35)))
+        a = int(alpha * (1 - ratio))   # alfa va de 'alpha' a 0
+        pygame.draw.circle(s, (r, g, b, a),
+                           (radius * 2, radius * 2),
+                           rad, max(2, radius // num_rings))
+
+    # Sin BLEND_RGBA_ADD para que el alpha funcione correctamente
+    surf.blit(s, (cx - radius * 2, cy - radius * 2))
 
 
 # ─────────────────────────────────────────────────────────
@@ -391,11 +430,35 @@ class Bullet:
     def draw(self, surf, ox, oy):
         sx, sy = int(self.x - ox), int(self.y - oy)
         if -12 < sx < W + 12 and -12 < sy < H + 12:
-            glow_circle(surf, self.col, sx, sy, 10, 60)
-            pygame.draw.circle(surf, self.col, (sx, sy), 5)
-            ex, ey = int(sx - self.vx*3), int(sy - self.vy*3)
+            # Ángulo de la dirección del disparo
+            angle = math.degrees(math.atan2(self.vy, self.vx))
+
+            # Dimensiones del rectángulo (largo x ancho)
+            bw, bh = 18, 6
+
+            # Crear superficie temporal con alpha para rotar
+            bsurf = pygame.Surface((bw + 4, bh + 4), pygame.SRCALPHA)
             r, g, b = self.col
-            pygame.draw.line(surf, (r//3, g//3, b//3), (sx, sy), (ex, ey), 2)
+
+            # Glow suave detrás
+            pygame.draw.rect(bsurf, (r, g, b, 60),
+                            (0, 0, bw + 4, bh + 4),
+                            border_radius=(bh + 4) // 2)
+
+            # Rectángulo principal con puntas redondeadas
+            pygame.draw.rect(bsurf, (r, g, b, 220),
+                            (2, 2, bw, bh),
+                            border_radius=bh // 2)
+
+            # Núcleo blanco brillante en el centro
+            pygame.draw.rect(bsurf, (255, 255, 255, 180),
+                            (4, 3, bw - 4, bh - 2),
+                            border_radius=(bh - 2) // 2)
+
+            # Rotar según dirección
+            rotated = pygame.transform.rotate(bsurf, -angle)
+            rw, rh = rotated.get_size()
+            surf.blit(rotated, (sx - rw // 2, sy - rh // 2))
 
 
 # ─────────────────────────────────────────────────────────
@@ -422,18 +485,53 @@ class SlashEffect:
 
     def draw(self, surf, ox, oy):
         ratio = self.life / self.max_life
-        pts   = []
-        n     = 9
-        for i in range(n):
-            ang = math.radians(-55 + 110 * (i / (n-1)))
-            px  = self.cx + self.facing * math.cos(ang) * 56 * ratio - ox
-            py  = self.cy + math.sin(ang) * 44 * ratio - oy
-            pts.append((int(px), int(py)))
-        if len(pts) >= 2:
-            pygame.draw.lines(surf, CYAN, False, pts, 3)
-            for p in pts[::3]:
-                glow_circle(surf, CYAN, p[0], p[1], 6, int(80 * ratio))
+        cx = int(self.cx - ox)
+        cy = int(self.cy - oy)
 
+        r_outer = int(62 * ratio)
+        r_inner = int(36 * ratio)
+
+        if r_outer < 2 or r_inner < 2:
+            return
+
+        # facing=1 = derecha (0°), facing=-1 = izquierda (180°)
+        base = 0.0 if self.facing == 1 else math.pi
+        spread = math.radians(65)
+        n = 18
+
+        outer = []
+        for i in range(n + 1):
+            ang = base - spread + (2 * spread * i / n)
+            outer.append((
+                cx + int(math.cos(ang) * r_outer),
+                cy + int(math.sin(ang) * r_outer)
+            ))
+
+        inner = []
+        for i in range(n + 1):
+            ang = base + spread - (2 * spread * i / n)
+            inner.append((
+                cx + int(math.cos(ang) * r_inner),
+                cy + int(math.sin(ang) * r_inner)
+            ))
+
+        pts = outer + inner
+        if len(pts) < 3:
+            return
+
+        s = pygame.Surface((surf.get_width(), surf.get_height()), pygame.SRCALPHA)
+        alpha = int(200 * ratio)
+        r, g, b = CYAN
+
+        pygame.draw.polygon(s, (r, g, b, alpha // 3), pts)
+        pygame.draw.lines(s, (r, g, b, alpha), False, outer, 3)
+        pygame.draw.lines(s, (r, g, b, alpha // 2), False, inner, 2)
+
+        surf.blit(s, (0, 0))
+
+        glow_circle(surf, CYAN, outer[0][0],      outer[0][1],      7, int(90 * ratio))
+        glow_circle(surf, CYAN, outer[-1][0],     outer[-1][1],     7, int(90 * ratio))
+        #glow_circle(surf, CYAN, outer[n//2][0],   outer[n//2][1],   7, int(90 * ratio))
 
 # ─────────────────────────────────────────────────────────
 # JUGADOR – SAKÍ KISHIMOTO
@@ -724,7 +822,7 @@ class Player:
 
         # Aura neural (detrás del sprite)
         if self.neural_t > 0:
-            glow_circle(surf, PURPLE, rx + self.PW // 2, ry + self.PH // 2, 52, 55)
+            glow_buble(surf, PURPLE, rx + self.PW // 2, ry + self.PH  // 3, 52, 55)
 
         # Dibujar alineando "pies" con el collider
         px = rx + self.PW // 2 - PLAYER_FRAME_W // 2
@@ -1023,10 +1121,10 @@ class Item:
         if pygame.Rect(int(self.x)-12, int(iy)-12, 24, 24).colliderect(player.rect):
             if self.itype == "health":
                 player.hp = min(player.hp + 45, player.max_hp)
-                spawn(self.x, self.y, GREEN, 12, 3, 30, 5)
+                spawn(self.x, self.y, GREEN, 24, 3, 60, 5)
             else:
                 player.ammo = min(player.ammo + 12, player.max_ammo)
-                spawn(self.x, self.y, CYAN, 12, 3, 30, 5)
+                spawn(self.x, self.y, CYAN, 24, 3, 60, 5)
             self.alive = False
 
     def draw(self, surf, ox, oy):
@@ -1034,11 +1132,17 @@ class Item:
         sy = int(self.y - math.sin(self.bob)*5 - oy)
         if -30 < sx < W+30 and -30 < sy < H+30:
             col = GREEN if self.itype == "health" else CYAN
-            glow_circle(surf, col, sx, sy, 14, 80)
-            pygame.draw.rect(surf, col, (sx-9, sy-9, 18, 18), border_radius=4)
-            pygame.draw.rect(surf, WHITE, (sx-9, sy-9, 18, 18), 1, border_radius=4)
-            surf.blit(FNT_XS.render("+HP" if self.itype == "health" else "+AM", True, WHITE),
-                      (sx - 11, sy - 22))
+            glow_buble(surf, col, sx, sy, 32, 60)  # glow detrás
+
+            img = ITEM_IMAGES.get(self.itype)
+            if img:
+                surf.blit(img, (sx - 26, sy - 26))  # centrada
+            else:
+                # fallback al diseño original
+                pygame.draw.rect(surf, col, (sx-9, sy-9, 18, 18), border_radius=4)
+                pygame.draw.rect(surf, WHITE, (sx-9, sy-9, 18, 18), 1, border_radius=4)
+                surf.blit(FNT_XS.render("+HP" if self.itype == "health" else "+AM", True, WHITE),
+                        (sx - 11, sy - 22))
 
 
 # ─────────────────────────────────────────────────────────
@@ -1197,10 +1301,10 @@ def draw_hud(surf, player, zone_name, score, boss):
     txt(surf, f"SAKÍ  ──  LVL {player.level}", FNT_SM, WHITE, 16, 28)
     bar(surf, 16, 54, 180, 15, player.hp/player.max_hp, RED, label=f"HP  {player.hp}/{player.max_hp}")
     bar(surf, 16, 74, 180, 15, player.ammo/player.max_ammo, CYAN, label=f"AMO {player.ammo}/{player.max_ammo}")
-    bar(surf, 16, 95, 180, 11, player.xp/player.xp_to_next, GOLD, label=f"XP  {player.xp}/{player.xp_to_next}")
+    bar(surf, 16, 94, 180, 15, player.xp/player.xp_to_next, GOLD, label=f"XP  {player.xp}/{player.xp_to_next}")
     nc_pct = 1 - player.neural_cd/600
     nc_col = PURPLE if nc_pct >= 1 or player.neural_t > 0 else GREY
-    bar(surf, 16, 112, 180, 9, nc_pct, nc_col, label="DESCARGA NEURAL")
+    bar(surf, 16, 114, 180, 15, nc_pct, nc_col, label="DESCARGA NEURAL")
 
     # zona / score
     zt = FNT_SM.render(zone_name, True, CYAN)
@@ -1212,7 +1316,7 @@ def draw_hud(surf, player, zone_name, score, boss):
     if player.levelup_t > 0:
         lt = FNT_BIG.render(f"¡NIVEL {player.level}!", True, GOLD)
         surf.blit(lt, (W//2 - lt.get_width()//2, H//2 - 50))
-        glow_circle(surf, GOLD, W//2, H//2, 140, 55)
+        #glow_circle(surf, GOLD, W//2, H//2, 140, 55)
 
     # combo
     if player.combo > 0 and player.combo_t > 0:
@@ -1253,10 +1357,10 @@ def draw_hud(surf, player, zone_name, score, boss):
 # ─────────────────────────────────────────────────────────
 def draw_title(surf, tick):
     surf.fill(BG1)
-    for i in range(12):
-        ang = i/12 * math.tau + tick*0.012
-        px = W//2 + int(math.cos(ang)*220)
-        py = H//2 + int(math.sin(ang)*140)
+    for i in range(18):
+        ang = i/18 * math.tau + tick*0.012
+        px = W//2 + int(math.cos(ang)*360) #Cambios en el radio horizontal
+        py = H//2 + int(math.sin(ang)*280) #Cambios en el radio vertical
         glow_circle(surf, (CYAN, PURPLE, PINK)[i % 3], px, py, 20, 40)
 
     t1 = FNT_BIG.render("NEUROCALIPSIS", True, CYAN)
@@ -1280,21 +1384,24 @@ def draw_title(surf, tick):
         surf.blit(lt, (W//2 - lt.get_width()//2, y0 + 136 + i*28))
     surf.blit(t4, (W//2 - t4.get_width()//2, y0 + 236))
     surf.blit(t5, (W//2 - t5.get_width()//2, y0 + 280))
-    glow_circle(surf, CYAN, W//2, H//2, 300, 20)
+    #glow_circle(surf, CYAN, W//2, H//2, 300, 20)
 
 
 # ─────────────────────────────────────────────────────────
 # MENÚ DE PAUSA
 # ─────────────────────────────────────────────────────────
 def draw_pause_menu(surf):
+    panel = pygame.Surface((360, 320), pygame.SRCALPHA)
     ov = pygame.Surface((W, H), pygame.SRCALPHA)
+    panel.fill((10, 20, 40, 230))
     ov.fill((0, 0, 0, 160))
     surf.blit(ov, (0, 0))
+    surf.blit(panel, (W//2 - panel.get_width()//2, H//2 - panel.get_height()//2))
+    pygame.draw.rect(surf, (0, 230, 220), (W//2 - 180, H//2 - 160, 360, 320), 4, border_radius=10)
     txt(surf, "PAUSA", FNT_BIG, CYAN, W//2 - 120, H//2 - 100)
     txt(surf, "ESC = Reanudar", FNT_SM, WHITE, W//2 - 90, H//2 - 20)
-    txt(surf, "Q = Salir al título", FNT_SM, GREY, W//2 - 100, H//2 + 20)
-    txt(surf, "F1 = Debug", FNT_XS, DKGREY, W//2 - 35, H//2 + 60)
-
+    txt(surf, "Q = Salir al título", FNT_SM, WHITE, W//2 - 90, H//2 + 20)
+    txt(surf, "F1 = Debug", FNT_SM, WHITE, W//2 - 90, H//2 + 60)
 
 def draw_ability_menu(surf, abilities_dict):
     """Menú de desbloqueos (TAB)."""
