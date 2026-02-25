@@ -31,6 +31,7 @@ from particles import ParticleSystem
 import abilities as ab
 import minimap as mm
 from data.load_stats import get_enemy_stats
+import drone_sprites  # ← sprites del drone
 
 pygame.init()
 pygame.mixer.init(frequency=22050, size=-16, channels=2, buffer=512)
@@ -64,6 +65,9 @@ DKGREY   = (20,  25,  35)
 screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 W, H = screen.get_size()
 clock  = pygame.time.Clock()
+
+# Inicializar sprites del drone (después de set_mode para que convert_alpha funcione)
+drone_sprites.init()
 
 # ─────────────────────────────────────────────────────────
 # CARGAR SONIDOS
@@ -692,11 +696,14 @@ class Player:
             if self.dash_timer <= 0:
                 self.vx = lerp(self.vx, mv * 5.6, 0.22)
             self.walk_t += 1
-            if self.walk_t % 7 == 0:
+            # Faster animation when dashing, normal otherwise
+            step = 4 if self.dash_timer > 0 else 6
+            if self.walk_t % step == 0:
                 self.walk_fr = (self.walk_fr + 1) % len(SPR_RUN_R)
         else:
             if self.dash_timer <= 0:
                 self.vx = lerp(self.vx, 0, 0.18)
+            self.walk_t = 0   # reset so run starts cleanly from frame 0
 
         if self.dash_timer > 0:
             self.vx = self.facing * 14
@@ -811,7 +818,9 @@ class Player:
             frame = (SPR_SHOOT_L if facing_left else SPR_SHOOT_R)[idx]
 
         elif not self.on_ground:
-            frame = (SPR_IDLE_L if facing_left else SPR_IDLE_R)[0]
+            # Going up → arms up pose (frame 0), falling → slightly leaned (frame 2)
+            air_idx = 0 if self.vy < -2 else (2 if self.vy > 3 else 1)
+            frame = (SPR_IDLE_L if facing_left else SPR_IDLE_R)[air_idx]
 
         elif abs(self.vx) > 0.6:
             frame = (SPR_RUN_L if facing_left else SPR_RUN_R)[self.walk_fr % len(SPR_RUN_R)]
@@ -874,7 +883,7 @@ class Enemy:
             self.hp = self.max_hp = 65 + sc*22
             self.speed = 2.3 + sc*0.3
             self.xp_val = 20 + sc*6
-            self.col = (175, 75, 75)
+            self.col = (90, 120, 155)   # steel-blue android (was muddy reddish)
             self.at_r = 34
             self.dmg = 12+sc*3
             self.at_cd = 62
@@ -1028,6 +1037,15 @@ class Enemy:
                     self.facing *= -1
                 r = self.rect
 
+        # ── Edge detection: don't walk off ledges (ground enemies only) ──────
+        if self.on_ground and self.etype != "drone":
+            probe_x = (self.x + self.w + 4) if self.vx > 0 else (self.x - 4)
+            probe_y = self.y + self.h + 6
+            has_floor = any(t.collidepoint(probe_x, probe_y) for t in tiles)
+            if not has_floor:
+                self.facing *= -1
+                self.vx *= -1
+
         if self.etype == "jefe" and self.hp < self.max_hp * 0.5:
             self.phase = 2
 
@@ -1048,41 +1066,160 @@ class Enemy:
             atk_raise = (1 - self.attack_windup / 22.0) * 12
 
         if self.etype == "infectado":
-            sway = int(math.sin(t) * 3)
-            body_y = ry + 14
-            pygame.draw.rect(surf, col, (rx + sway, body_y, self.w, self.h-14), border_radius=4)
-            head_y = ry + 12 - atk_raise
-            pygame.draw.circle(surf, col, (rx+self.w//2 + sway, head_y), 13)
-            ex = rx + (10 if self.facing > 0 else 5) + sway
-            pygame.draw.circle(surf, RED, (ex, head_y-1), 3)
-            pygame.draw.circle(surf, RED, (ex+7, head_y-1), 3)
-            pygame.draw.line(surf, PINK, (rx, body_y+6), (rx+self.w, body_y+6), 1)
-            pygame.draw.line(surf, PINK, (rx, body_y+14), (rx+self.w, body_y+14), 1)
+            sway   = int(math.sin(t) * 1.5)
+            moving = abs(self.vx) > 0.5
+            leg_f  = math.sin(t * 1.9) * 6  if moving else 0
+            arm_f  = math.sin(t * 1.9 + math.pi) * 5 if moving else 0
+            atk_glow = getattr(self, "attack_windup", 0) > 0
+
+            # Lighter accent colour
+            light = (min(255, col[0]+55), min(255, col[1]+55), min(255, col[2]+65))
+            dim   = (max(0, col[0]-25),   max(0, col[1]-20),   max(0, col[2]-20))
+
+            # ── Legs ──────────────────────────────────────────
+            foot_l = (rx + 5 + int( leg_f), ry + self.h - 2)
+            foot_r = (rx + self.w - 5 - int(leg_f), ry + self.h - 2)
+            knee_l = (rx + 7 + sway, ry + 28)
+            knee_r = (rx + self.w - 7 + sway, ry + 28)
+            pygame.draw.line(surf, dim,   knee_l, foot_l, 4)
+            pygame.draw.line(surf, dim,   knee_r, foot_r, 4)
+            pygame.draw.rect(surf, light, (foot_l[0]-4, foot_l[1]-2, 8, 4), border_radius=2)
+            pygame.draw.rect(surf, light, (foot_r[0]-4, foot_r[1]-2, 8, 4), border_radius=2)
+
+            # ── Pelvis / hip connector ─────────────────────────
+            pygame.draw.rect(surf, dim, (rx + 5 + sway, ry + 26, self.w - 10, 6), border_radius=2)
+
+            # ── Torso ─────────────────────────────────────────
+            pygame.draw.rect(surf, col,  (rx + 4 + sway, ry + 17, self.w - 8, 12), border_radius=3)
+            # Chest core crystal (glows when attacking)
+            core_c = PINK if atk_glow else (180, 30, 50)
+            pygame.draw.rect(surf, core_c, (rx + self.w//2 - 3 + sway, ry + 19, 6, 6), border_radius=2)
+            if atk_glow:
+                glow_circle(surf, PINK,  rx + self.w//2 + sway, ry + 22, 7, 110)
+            else:
+                glow_circle(surf, core_c, rx + self.w//2 + sway, ry + 22, 4, 50)
+            # Trim line
+            pygame.draw.line(surf, light, (rx + 5 + sway, ry + 18), (rx + self.w - 5 + sway, ry + 18), 1)
+
+            # ── Shoulder armour ────────────────────────────────
+            pygame.draw.rect(surf, light, (rx      + sway, ry + 16, 7, 8), border_radius=2)
+            pygame.draw.rect(surf, light, (rx + self.w - 7 + sway, ry + 16, 7, 8), border_radius=2)
+
+            # ── Arms ──────────────────────────────────────────
+            arm_ty = ry + 19
+            hand_l = (rx - 1 + sway, arm_ty + 9 + int(arm_f))
+            hand_r = (rx + self.w + 1 + sway, arm_ty + 9 - int(arm_f))
+            pygame.draw.line(surf, dim, (rx + 3 + sway, arm_ty), hand_l, 3)
+            pygame.draw.line(surf, dim, (rx + self.w - 3 + sway, arm_ty), hand_r, 3)
+            pygame.draw.circle(surf, light, hand_l, 3)
+            pygame.draw.circle(surf, light, hand_r, 3)
+
+            # ── Neck ──────────────────────────────────────────
+            pygame.draw.rect(surf, dim, (rx + 10 + sway, ry + 12, 6, 6))
+
+            # ── Head ──────────────────────────────────────────
+            head_y = ry + 2 - int(atk_raise)
+            pygame.draw.rect(surf, col, (rx + 4 + sway, head_y, self.w - 8, 12), border_radius=4)
+            # Visor band
+            v_col = (255, 50, 50) if atk_glow else (170, 30, 35)
+            pygame.draw.rect(surf, v_col, (rx + 5 + sway, head_y + 4, self.w - 10, 5), border_radius=2)
+            # Individual LED eyes
+            ex = rx + (7 if self.facing > 0 else self.w - 11) + sway
+            pygame.draw.rect(surf, (255, 240, 180), (ex,     head_y + 5, 3, 3))
+            pygame.draw.rect(surf, (255, 240, 180), (ex + 4, head_y + 5, 3, 3))
+            eye_intensity = 90 if atk_glow else 45
+            glow_circle(surf, (255, 80, 50), ex + 1,     head_y + 6, 4, eye_intensity)
+            glow_circle(surf, (255, 80, 50), ex + 5,     head_y + 6, 4, eye_intensity)
+            # Antenna
+            ant_x = rx + self.w // 2 + sway
+            pygame.draw.line(surf, CYAN, (ant_x, head_y), (ant_x, head_y - 6), 1)
+            pygame.draw.circle(surf, CYAN, (ant_x, head_y - 6), 2)
+            glow_circle(surf, CYAN, ant_x, head_y - 6, 3, 50)
 
         elif self.etype == "drone":
-            cx2, cy2 = rx + self.w//2, ry + self.h//2
-            rot = (self.anim_t * 2) % 360
-            pts = [(cx2+int(14*math.cos(math.radians(a+rot))),
-                    cy2+int(9 * math.sin(math.radians(a+rot)))) for a in range(0, 360, 60)]
-            bob = int(math.sin(t) * 2)
-            pts = [(p[0], p[1] + bob) for p in pts]
-            pygame.draw.polygon(surf, col, pts)
-            pygame.draw.polygon(surf, CYAN, pts, 2)
-            pygame.draw.circle(surf, CYAN, (cx2, cy2 + bob), 4)
-            glow_circle(surf, CYAN, cx2, cy2 + bob, 12, 55)
+            frame = drone_sprites.get_frame(self.anim_t, self.attack_t, self.at_cd, self.facing)
+            if frame is not None:
+                # Tinte rojo al recibir daño
+                if self.hurt_t > 0 and (self.hurt_t // 3) % 2 == 0:
+                    frame = frame.copy()
+                    frame.fill((200, 0, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
+                # Tinte púrpura cuando está ralentizado (descarga neural)
+                if getattr(self, "slowed", False):
+                    frame = frame.copy()
+                    frame.fill((70, 0, 140, 0), special_flags=pygame.BLEND_RGB_ADD)
+                fw, fh = frame.get_size()
+                # Centrar sobre el collider del drone
+                draw_x = rx + self.w // 2 - fw // 2
+                draw_y = ry + self.h // 2 - fh // 2
+                surf.blit(frame, (draw_x, draw_y))
+            else:
+                # Fallback procedural si no hay sprite
+                cx2, cy2 = rx + self.w//2, ry + self.h//2
+                rot = (self.anim_t * 2) % 360
+                pts = [(cx2+int(14*math.cos(math.radians(a+rot))),
+                        cy2+int(9 * math.sin(math.radians(a+rot)))) for a in range(0, 360, 60)]
+                bob = int(math.sin(t) * 2)
+                pts = [(p[0], p[1] + bob) for p in pts]
+                col = RED if self.hurt_t > 0 else self.col
+                pygame.draw.polygon(surf, col, pts)
+                pygame.draw.polygon(surf, CYAN, pts, 2)
+                pygame.draw.circle(surf, CYAN, (cx2, cy2 + bob), 4)
+                glow_circle(surf, CYAN, cx2, cy2 + bob, 12, 55)
 
         elif self.etype == "mutante":
+            moving = abs(self.vx) > 0.4
+            leg_f  = math.sin(t * 1.5) * 8 if moving else 0
+            arm_sw = math.sin(t * 1.5 + math.pi) * 10 if moving else 0
+            atk_glow = getattr(self, "attack_windup", 0) > 0
             breath = 1.0 + 0.04 * math.sin(t)
-            bw, bh = int((self.w-8) * breath), self.h-22
-            bx = rx + 4 - (bw - (self.w-8))//2
-            pygame.draw.rect(surf, col, (bx, ry+22, bw, bh), border_radius=5)
-            pygame.draw.circle(surf, col, (rx+self.w//2, ry+20), int(20 * breath))
+            light = (min(255, col[0]+45), min(255, col[1]+35), min(255, col[2]+20))
+            dim   = (max(0, col[0]-20),   max(0, col[1]-15),   max(0, col[2]-10))
+
+            # Legs — thick powerful limbs
+            pygame.draw.line(surf, dim, (rx+14, ry+self.h-22), (rx+8+int(leg_f),  ry+self.h-2), 7)
+            pygame.draw.line(surf, dim, (rx+30, ry+self.h-22), (rx+36-int(leg_f), ry+self.h-2), 7)
+            pygame.draw.rect(surf, light, (rx+4+int(leg_f),   ry+self.h-6, 10, 6), border_radius=3)
+            pygame.draw.rect(surf, light, (rx+30-int(leg_f),  ry+self.h-6, 10, 6), border_radius=3)
+
+            # Main body
+            bw, bh = int((self.w - 6) * breath), self.h - 28
+            bx = rx + 3 - (bw - (self.w - 6)) // 2
+            pygame.draw.rect(surf, col,  (bx, ry + 28, bw, bh), border_radius=5)
+            # Belly segments
             for i in range(3):
-                sx2 = rx + 6 + i*14
-                pygame.draw.polygon(surf, ORANGE,
-                                    [(sx2, ry+4), (sx2+6, ry+20), (sx2-6, ry+20)])
-            pygame.draw.circle(surf, RED, (rx+self.w//2-6, ry+16), 4)
-            pygame.draw.circle(surf, RED, (rx+self.w//2+6, ry+16), 4)
+                seg_y = ry + 32 + i * 10
+                pygame.draw.line(surf, dim, (bx + 3, seg_y), (bx + bw - 3, seg_y), 1)
+
+            # Shoulder pads (wide)
+            pygame.draw.rect(surf, light, (rx - 2, ry + 22, 12, 10), border_radius=3)
+            pygame.draw.rect(surf, light, (rx + self.w - 10, ry + 22, 12, 10), border_radius=3)
+
+            # Arms (heavy, swinging)
+            pygame.draw.line(surf, col, (rx + 4,          ry + 24), (rx - 6,          ry + 38 + int(arm_sw)), 6)
+            pygame.draw.line(surf, col, (rx + self.w - 4, ry + 24), (rx + self.w + 6, ry + 38 - int(arm_sw)), 6)
+            # Fists / claws
+            claw_l = (rx - 8,          ry + 38 + int(arm_sw))
+            claw_r = (rx + self.w + 8, ry + 38 - int(arm_sw))
+            for dx2, dy2 in [(-3,-3),(0,-4),(3,-3)]:
+                pygame.draw.line(surf, ORANGE, claw_l, (claw_l[0]+dx2, claw_l[1]+dy2+(-5 if atk_glow else 0)), 2)
+                pygame.draw.line(surf, ORANGE, claw_r, (claw_r[0]-dx2, claw_r[1]+dy2+(-5 if atk_glow else 0)), 2)
+
+            # Head (larger, brutish)
+            pygame.draw.circle(surf, col, (rx + self.w // 2, ry + 22), int(18 * breath))
+            # Bony spikes on head
+            for i, sx2 in enumerate([rx+self.w//2-14, rx+self.w//2, rx+self.w//2+14]):
+                h_spk = 8 + i % 2 * 4
+                pygame.draw.polygon(surf, ORANGE, [(sx2-4, ry+10),(sx2+4, ry+10),(sx2, ry+10-h_spk)])
+            # Eyes — three (creepy)
+            ec = RED if atk_glow else (200, 30, 30)
+            for ex_off in (-8, 0, 8):
+                pygame.draw.circle(surf, ec, (rx + self.w//2 + ex_off, ry + 20), 3)
+                if atk_glow:
+                    glow_circle(surf, RED, rx + self.w//2 + ex_off, ry + 20, 5, 100)
+                else:
+                    glow_circle(surf, ec,  rx + self.w//2 + ex_off, ry + 20, 3, 40)
+            # Mouth gash
+            pygame.draw.line(surf, (200, 0, 0), (rx + self.w//2 - 8, ry + 26), (rx + self.w//2 + 8, ry + 26), 2)
 
         elif self.etype == "jefe":
             pulse = 0.85 + 0.15 * math.sin(t * 1.5)
@@ -1099,10 +1236,16 @@ class Enemy:
                 cy_ = ry + 44 + i*12
                 pygame.draw.line(surf, PURPLE, (rx+8, cy_), (rx+self.w-8, cy_), 1)
 
-        bw = self.w + 8
-        bar(surf, rx-4, ry-10, bw, 7,
-            self.hp / self.max_hp,
-            PURPLE if self.etype == "jefe" else RED)
+        # HP bar — always drawn on top, color-coded by type
+        hp_pct  = self.hp / self.max_hp
+        bar_col = {
+            "jefe":     PURPLE,
+            "mutante":  ORANGE,
+            "infectado": CYAN,
+            "drone":    (90, 90, 245),
+        }.get(self.etype, RED)
+        bw2 = self.w + 10
+        bar(surf, rx - 5, ry - 11, bw2, 6, hp_pct, bar_col)
 
 
 # ─────────────────────────────────────────────────────────
@@ -1193,17 +1336,50 @@ def build_level(n):
     boss_y = gy - 96
     world_w = boss_x + 600
 
+    # Ground segment tops (raised segments at y=560, others at y=610):
+    #   0..780=610, 840..1260=560, 1310..1830=610, 1880..2310=560,
+    #   2360..3000=610, 3050..3570=560, 3620..4500=610
+    def _floor_y(x, h):
+        """Correct spawn y so enemy stands exactly on the right ground segment."""
+        for sx, sy, sw in [(0,610,780),(840,560,420),(1310,610,520),(1880,560,430),
+                           (2360,610,640),(3050,560,520),(3620,610,880)]:
+            if sx <= x < sx + sw:
+                return sy - h
+        return gy - h   # fallback
+
+    _ih, _mh = 42, 64   # infectado/mutante heights
+
     e_defs = [
-        (360, gy-42, "infectado"), (540, gy-42, "infectado"), (790, 530, "infectado"),
-        (960, gy-42, "infectado"), (1120, 310, "drone"), (1400, gy-42, "infectado"),
-        (1620, 270, "drone"), (1820, 390, "infectado"), (2150, gy-42, "infectado"),
-        (2280, 250, "drone"), (2500, gy-42, "mutante"), (2790, gy-42, "infectado"),
-        (3060, 235, "drone"), (3250, gy-42, "infectado"), (3440, gy-42, "mutante"),
-        (3740, 190, "drone"), (3930, 250, "infectado"), (4100, gy-42, "infectado"),
-        (4260, 250, "mutante"),
+        # Seg 1 top=610: infectado y = 610-42 = 568
+        (360,  _floor_y(360,  _ih), "infectado"),
+        (540,  _floor_y(540,  _ih), "infectado"),
+        (730,  _floor_y(730,  _ih), "infectado"),   # was 790 (in gap 780-840!) → 730
+        # Seg 2 top=560: infectado y = 560-42 = 518  (was wrong gy-42=568 = inside tile!)
+        (960,  _floor_y(960,  _ih), "infectado"),
+        (1120, 310,                  "drone"),
+        # Seg 3 top=610
+        (1400, _floor_y(1400, _ih), "infectado"),
+        (1620, 270,                  "drone"),
+        (1820, 390,                  "infectado"),   # drops onto platform, ok
+        # Seg 4 top=560: infectado y = 518
+        (2150, _floor_y(2150, _ih), "infectado"),
+        (2280, 250,                  "drone"),
+        # Seg 5 top=610: mutante h=64 → y = 546  (gy-42=568 was inside tile!)
+        (2500, _floor_y(2500, _mh), "mutante"),
+        (2790, _floor_y(2790, _ih), "infectado"),
+        (3060, 235,                  "drone"),
+        # Seg 6 top=560: infectado y=518, mutante y=496
+        (3250, _floor_y(3250, _ih), "infectado"),
+        (3440, _floor_y(3440, _mh), "mutante"),
+        (3740, 190,                  "drone"),
+        (3930, 250,                  "infectado"),   # drops onto platform, ok
+        # Seg 7 top=610
+        (4100, _floor_y(4100, _ih), "infectado"),
+        (4260, 250,                  "mutante"),     # drops onto platform, ok
     ]
     if n >= 2:
-        e_defs += [(1750, 290, "mutante"), (2600, 370, "drone"), (3800, gy-42, "mutante")]
+        e_defs += [(1750, 290, "mutante"), (2600, 370, "drone"),
+                   (3800, _floor_y(3800, _mh), "mutante")]  # was gy-42=568, needs 546
     if n >= 3:
         extras = [(ex+80, ey, "drone") for ex, ey, et in e_defs[::3]]
         e_defs += extras
