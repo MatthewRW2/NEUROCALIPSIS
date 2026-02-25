@@ -14,9 +14,15 @@ Animaciones detectadas (spritesheet 1536×1024):
 
 import pygame
 import os
+import sys
 import math
 
-BASE_DIR = os.path.dirname(__file__)
+def _resource_base():
+    if getattr(sys, "frozen", False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = _resource_base()
 
 # ── Coordenadas en el spritesheet  (x, y, ancho, alto) ───────────────────────
 # Medidas automáticamente — ajusta si ves desplazamiento

@@ -72,7 +72,13 @@ drone_sprites.init()
 # ─────────────────────────────────────────────────────────
 # CARGAR SONIDOS
 # ─────────────────────────────────────────────────────────
-BASE_DIR = os.path.dirname(__file__)
+# Base para recursos: al compilar con PyInstaller los datos están en sys._MEIPASS
+def _resource_base():
+    if getattr(sys, "frozen", False):
+        return sys._MEIPASS
+    return os.path.dirname(os.path.abspath(__file__))
+
+BASE_DIR = _resource_base()
 
 print(f"📁 Directorio actual: {BASE_DIR}")
 print(f"🔊 Buscando sonido en: {os.path.join(BASE_DIR, 'sounds', 'slash.wav')}")
